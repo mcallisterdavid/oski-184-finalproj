@@ -15,15 +15,11 @@ protocol RenderDestinationProvider {
     var currentRenderPassDescriptor: MTLRenderPassDescriptor? { get }
     var currentDrawable: CAMetalDrawable? { get }
     var colorPixelFormat: MTLPixelFormat { get set }
-    var depthStencilPixelFormat: MTLPixelFormat { get set }
     var sampleCount: Int { get set }
 }
 
 // The max number of command buffers in flight.
 let kMaxBuffersInFlight: Int = 3
-
-// The 16 byte aligned size of our uniform structures.
-let kAlignedSharedUniformsSize: Int = (MemoryLayout<SharedUniforms>.size & ~0xFF) + 0x100
 
 // Vertex data for an image plane.
 let kImagePlaneVertexData: [Float] = [
@@ -60,28 +56,11 @@ class Renderer {
     
     // A texture of the blurred depth data to pass to the GPU for fog rendering.
     var filteredDepthTexture: MTLTexture!
-    
-    // The camera image from the current frame.
-    var capturedImage: CVPixelBuffer!
-    
     // A filter used to blur the depth data for rendering fog.
     var blurFilter: MPSImageGaussianBlur?
     
     // Captured image texture cache.
     var cameraImageTextureCache: CVMetalTextureCache!
-    
-    // Used to determine _uniformBufferStride each frame.
-    // This is the current frame number modulo kMaxBuffersInFlight.
-    var uniformBufferIndex: Int = 0
-    
-    // Offset within _sharedUniformBuffer to set for the current frame.
-    var sharedUniformBufferOffset: Int = 0
-    
-    // Offset within _anchorUniformBuffer to set for the current frame.
-    var anchorUniformBufferOffset: Int = 0
-    
-    // Addresses to write shared uniforms to each frame.
-    var sharedUniformBufferAddress: UnsafeMutableRawPointer!
     
     // The current viewport size.
     var viewportSize: CGSize = CGSize()
@@ -124,7 +103,6 @@ class Renderer {
                 }
             }
             
-            updateBufferStates()
             updateAppState()
             
             applyGaussianBlur(commandBuffer: commandBuffer)
@@ -200,6 +178,7 @@ class Renderer {
         fogPipelineStateDescriptor.sampleCount = renderDestination.sampleCount
         fogPipelineStateDescriptor.vertexFunction = fogVertexFunction
         fogPipelineStateDescriptor.fragmentFunction = fogFragmentFunction
+        fogPipelineStateDescriptor.vertexDescriptor = imagePlaneVertexDescriptor
         fogPipelineStateDescriptor.colorAttachments[0].pixelFormat = renderDestination.colorPixelFormat
 
         // Initialize the pipeline.
@@ -211,13 +190,6 @@ class Renderer {
         
         // Create the command queue for one frame of rendering work.
         commandQueue = device.makeCommandQueue()
-    }
-    
-    // Updates the location to write to in the dynamically changing Metal buffers for
-    // the current frame (i.e. update the slot in the ring buffer for the current frame).
-    func updateBufferStates() {
-        uniformBufferIndex = (uniformBufferIndex + 1) % kMaxBuffersInFlight
-        sharedUniformBufferOffset = kAlignedSharedUniformsSize * uniformBufferIndex
     }
     
     // Updates any app state.
@@ -263,8 +235,8 @@ class Renderer {
 
     // Prepares the scene depth information for transfer to the GPU for rendering.
     func updateARDepthTexures(frame: ARFrame) {
-        // Get the scene depth from the current frame.
-        guard let sceneDepth = frame.sceneDepth else {
+        // Get the scene depth or smoothed scene depth from the current frame.
+        guard let sceneDepth = frame.smoothedSceneDepth ?? frame.sceneDepth else {
             print("Failed to acquire scene depth.")
             return
         }
@@ -313,8 +285,8 @@ class Renderer {
             let transformedCoord = textureCoord.applying(displayToCameraTransform)
             vertexData[textureCoordIndex] = Float(transformedCoord.x)
             vertexData[textureCoordIndex + 1] = Float(transformedCoord.y)
-            fogVertexData[textureCoordIndex] = kImagePlaneVertexData[textureCoordIndex]
-            fogVertexData[textureCoordIndex + 1] = kImagePlaneVertexData[textureCoordIndex + 1]
+            fogVertexData[textureCoordIndex] = Float(transformedCoord.x)
+            fogVertexData[textureCoordIndex + 1] = Float(transformedCoord.y)
         }
     }
     

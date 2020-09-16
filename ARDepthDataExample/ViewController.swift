@@ -16,6 +16,7 @@ extension MTKView: RenderDestinationProvider {
 class ViewController: UIViewController, MTKViewDelegate, ARSessionDelegate {
     
     var session: ARSession!
+    var configuration = ARWorldTrackingConfiguration()
     var renderer: Renderer!
     var depthBuffer: CVPixelBuffer!
     var confidenceBuffer: CVPixelBuffer!
@@ -50,10 +51,8 @@ class ViewController: UIViewController, MTKViewDelegate, ARSessionDelegate {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         
-        // Create a world-tracking configuration, and
-        // enable the scene depth frame-semantic.
-        let configuration = ARWorldTrackingConfiguration()
-        configuration.frameSemantics = .sceneDepth
+        // Enable the smoothed scene depth frame-semantic.
+        configuration.frameSemantics = .smoothedSceneDepth
 
         // Run the view's session.
         session.run(configuration)
@@ -92,9 +91,7 @@ class ViewController: UIViewController, MTKViewDelegate, ARSessionDelegate {
             let alertController = UIAlertController(title: "The AR session failed.", message: errorMessage, preferredStyle: .alert)
             let restartAction = UIAlertAction(title: "Restart Session", style: .default) { _ in
                 alertController.dismiss(animated: true, completion: nil)
-                if let configuration = self.session.configuration {
-                    self.session.run(configuration, options: .resetSceneReconstruction)
-                }
+                self.session.run(self.configuration, options: .resetSceneReconstruction)
             }
             alertController.addAction(restartAction)
             self.present(alertController, animated: true, completion: nil)
@@ -109,5 +106,17 @@ class ViewController: UIViewController, MTKViewDelegate, ARSessionDelegate {
     // Hide the status bar to maximize immersion in AR experiences.
     override var prefersStatusBarHidden: Bool {
         return true
+    }
+    
+    // MARK: Toggle smoothing
+    
+    // Switch between temporally smoothed and single-frame scene depth.
+    @IBAction func smoothingSwitchToggled(_ uiSwitch: UISwitch) {
+        if uiSwitch.isOn {
+            configuration.frameSemantics = .smoothedSceneDepth
+        } else {
+            configuration.frameSemantics = .sceneDepth
+        }
+        session.run(configuration)
     }
 }
