@@ -47,6 +47,17 @@ typedef struct {
     float2 texCoordScene;
 } FogColorInOut;
 
+kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[texture(0)]],
+                           texture2d<float, access::read> cameraImageTextureCbCr [[texture(1)]],
+                           texture2d<float, access::write> output [[texture(2)]],
+                           uint2 gid [[thread_position_in_grid]]) {
+    float4 yIn = cameraImageTextureY.read(gid);
+    float4 cbcrIn = cameraImageTextureCbCr.read(gid);
+    float4 diff = yIn - cbcrIn;
+    diff[3] = 1.0;
+    output.write(diff, gid);
+}
+
 // Fog the image vertex function.
 vertex FogColorInOut fogVertexTransform(const device FogVertex* cameraVertices [[ buffer(0) ]],
                                                          const device FogVertex* sceneVertices [[ buffer(1) ]],
@@ -68,7 +79,8 @@ fragment half4 fogFragmentShader(FogColorInOut in [[ stage_in ]],
 texture2d<float, access::sample> cameraImageTextureY [[ texture(0) ]],
 texture2d<float, access::sample> cameraImageTextureCbCr [[ texture(1) ]],
 depth2d<float, access::sample> arDepthTexture [[ texture(2) ]],
-texture2d<uint> arDepthConfidence [[ texture(3) ]])
+texture2d<uint> arDepthConfidence [[ texture(3) ]],
+texture2d<float, access::write> lineDraw [[ texture(4) ]])
 {
     // Whether to show the confidence debug visualization.
     // - Tag: ConfidenceVisualization
@@ -93,9 +105,12 @@ texture2d<uint> arDepthConfidence [[ texture(3) ]])
     // Sample this pixel's camera image color.
     float4 rgb = ycbcrToRGBTransform(
         cameraImageTextureY.sample(s, in.texCoordCamera),
+//        float4(0.0, 0.0, 0.0, 0.0)
         cameraImageTextureCbCr.sample(s, in.texCoordCamera)
     );
+    rgb = cameraImageTextureY.sample(s, in.texCoordCamera) - cameraImageTextureCbCr.sample(s, in.texCoordCamera);
     half4 cameraColor = half4(rgb);
+    
 
     // Sample this pixel's depth value.
     float depth = arDepthTexture.sample(s, in.texCoordCamera);
@@ -107,7 +122,8 @@ texture2d<uint> arDepthConfidence [[ texture(3) ]])
     float fogPercentage = depth / fogMax;
     
     // Mix the camera and fog colors based on the fog percentage.
-    half4 foggedColor = mix(cameraColor, fogColor, fogPercentage);
+    half4 foggedColor = mix(cameraColor, cameraColor, fogPercentage);
+    
     
     // Just return the fogged color if confidence visualization is disabled.
     if(!confidenceDebugVisualizationEnabled) {

@@ -21,6 +21,12 @@ protocol RenderDestinationProvider {
 // The max number of command buffers in flight.
 let kMaxBuffersInFlight: Int = 3
 
+var numFrames: Int = 0
+var frameProcessed = true
+
+let thetaRes = 1
+let rhoRes = 5
+
 // Vertex data for an image plane.
 let kImagePlaneVertexData: [Float] = [
     -1.0, -1.0, 0.0, 1.0,
@@ -34,9 +40,14 @@ class Renderer {
     let device: MTLDevice
     let inFlightSemaphore = DispatchSemaphore(value: kMaxBuffersInFlight)
     var renderDestination: RenderDestinationProvider
+    let numLines: Int = 5
+    var lineUpdate:Int = 0
     
     // Metal objects.
     var commandQueue: MTLCommandQueue!
+    
+    var lines: [Array<Int>] = []
+    var newLines: [Line] = []
     
     // An object that holds vertex information for source and destination rendering.
     var imagePlaneVertexBuffer: MTLBuffer!
@@ -56,8 +67,16 @@ class Renderer {
     
     // A texture of the blurred depth data to pass to the GPU for fog rendering.
     var filteredDepthTexture: MTLTexture!
+    
+    var filteredYTexture: MTLTexture!
+    
+    var lineTexture: MTLTexture!
+    
     // A filter used to blur the depth data for rendering fog.
-    var blurFilter: MPSImageGaussianBlur?
+    var downsizeFilter: MPSImageLanczosScale?
+    
+    // A filter used to blur the depth data for rendering fog.
+    var sobelFilter: MPSImageSobel?
     
     // Captured image texture cache.
     var cameraImageTextureCache: CVMetalTextureCache!
@@ -89,6 +108,7 @@ class Renderer {
         // pipeline (App, Metal, Drivers, GPU, etc).
         _ = inFlightSemaphore.wait(timeout: DispatchTime.distantFuture)
         
+        
         // Create a new command buffer for each renderpass to the current drawable.
         if let commandBuffer = commandQueue.makeCommandBuffer() {
             commandBuffer.label = "MyCommand"
@@ -105,10 +125,40 @@ class Renderer {
             
             updateAppState()
             
-            applyGaussianBlur(commandBuffer: commandBuffer)
+            
+            applySobel(commandBuffer: commandBuffer)
+//            applyGaussianBlur(commandBuffer: commandBuffer)
+            if (frameProcessed && filteredYTexture != nil) {
+                frameProcessed = false
+                Task.init{await findLines()}
+            }
+            
+            
+            
+            
             
             // Pass the depth and confidence pixel buffers to the GPU to shade-in the fog.
             if let renderPassDescriptor = renderDestination.currentRenderPassDescriptor, let currentDrawable = renderDestination.currentDrawable {
+//                let computeEncoder = commandBuffer.makeComputeCommandEncoder()
+//                if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
+//                    computeEncoder.label = "MyComputeEncoder"
+//
+//                    guard let cameraImageY = cameraImageTextureY, let cameraImageCbCr = cameraImageTextureCbCr
+//                        else {
+//                        return
+//                    }
+//
+//                    computeEncoder.setTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
+//                    computeEncoder.setTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
+//                    computeEncoder.setTexture(filteredYTexture, index: 2)
+//
+////                    let threadGroupSize = MTLSizeMake(16, 16, 1)
+////                    let threadGroupCount = MTLSizeMake(filteredYTexture.width)
+//
+//
+//                    computeEncoder.endEncoding()
+//
+//                }
 
                 if let fogRenderEncoding = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
                     
@@ -128,8 +178,111 @@ class Renderer {
             
             // Finalize rendering here & push the command buffer to the GPU.
             commandBuffer.commit()
+            
+            
+            
         }
     }
+    
+    
+    func findLines() async {
+        if (filteredYTexture != nil) {
+            
+            let tex = filteredYTexture!
+            
+            let bytesPerPixel = 1
+            
+            let bytesPerRow = tex.width * bytesPerPixel
+            
+            var data = [UInt8](repeating: 0, count: tex.width*tex.height)
+            
+            tex.getBytes(&data,
+                bytesPerRow: bytesPerRow,
+                from: MTLRegionMake2D(0, 0, tex.width, tex.height),
+                mipmapLevel: 0)
+            
+            
+            let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
+            let bitsPerComponent = 8
+            let colorSpace = CGColorSpaceCreateDeviceGray()
+            let context = CGContext(data: &data, width: tex.width, height: tex.height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo.rawValue)
+            
+            let m = data.max()!
+
+            // Creates the image from the graphics context
+            guard let dstImage = context?.makeImage() else { print("FAILED TO MAKE IMG")
+                return
+            }
+            
+            
+            let asUI = UIImage(cgImage: dstImage, scale: 0.0, orientation: .up)
+            
+            print("TRANSFORMING")
+            let hough = houghSpace(image: asUI, data: data)
+            print("FINDING PEAKS")
+            newLines = peakLines(houghSpace: hough, n: 20)
+            let imageWithLines = draw(lines: newLines, inImage: asUI, color: .white)
+            lineUpdate += 1
+            frameProcessed = true
+            if (m > 10) {
+                print("JAEMS")
+            }
+            return
+            
+            
+            
+            // BINNING CODE FOR EFFICIENCY BELOW (doesn't work)
+            
+            
+//            let thetaBins = Int(floor(180.0 / Double(thetaRes))) + 1
+//
+//            let rhoBins = 2 * Int(ceil(sqrt(pow(Double(tex.width), 2.0) + pow(Double(tex.height), 2.0)) / Double(rhoRes)))
+//
+//
+//
+//            var acc = Array(repeating: Array(repeating: 0, count: thetaBins), count: rhoBins)
+//
+//            func deg2rad(_ number: Double) -> Double {
+//                return number * .pi / 180
+//            }
+//
+//            var cnt = 0
+//            for i in 0...(data.count - 1) {
+//                let pix = data[i]
+//                if pix > 160 {
+//                    cnt += Int(1)
+//                    let x = i % tex.width
+//                    let y = (i / tex.width)
+//
+//                    var tryTheta = 0.0
+//                    while tryTheta < 180.0 {
+//                        let tryThetaR = deg2rad(tryTheta)
+//
+//                        let tryRho = Double(x) * cos(tryThetaR) - Double(y) * sin(tryThetaR)
+//                        let rhoBin = tryRho / Double(rhoRes) // + Double(rhoBins) / 2.0
+//                        let thetaBin = tryTheta / Double(thetaRes)
+//
+//                        if (tryRho >= 1) {
+//                            acc[Int(rhoBin)][Int(thetaBin)] += 1
+//                        }
+//                        tryTheta += Double(thetaRes)
+//                    }
+//
+//                }
+//            }
+//
+//            func to_rho(_ rhoBin: Double) -> Double {
+//                return (rhoBin - Double(rhoBins) / 2.0) * Double(rhoRes)
+//            }
+//
+//            func to_theta(_ thetaBin: Double) -> Double {
+//                return thetaBin * Double(thetaRes)
+//            }
+            
+            
+        }
+    }
+    
     
     // MARK: - Private
     
@@ -220,6 +373,7 @@ class Renderer {
         }
         cameraImageTextureY = createTexture(fromPixelBuffer: frame.capturedImage, pixelFormat: .r8Unorm, planeIndex: 0)
         cameraImageTextureCbCr = createTexture(fromPixelBuffer: frame.capturedImage, pixelFormat: .rg8Unorm, planeIndex: 1)
+        
     }
 
     // Assigns an appropriate MTL pixel format given the argument pixel-buffer's format.
@@ -255,6 +409,7 @@ class Renderer {
         pixelBuffer = sceneDepth.confidenceMap
         setMTLPixelFormat(&texturePixelFormat, basedOn: pixelBuffer)
         confidenceTexture = createTexture(fromPixelBuffer: pixelBuffer, pixelFormat: texturePixelFormat, planeIndex: 0)
+        
     }
         
     // Creates a Metal texture with the argument pixel format from a CVPixelBuffer at the argument plane index.
@@ -309,6 +464,7 @@ class Renderer {
         renderEncoder.setVertexBuffer(imagePlaneVertexBuffer, offset: 0, index: 1)
 
         // Setup textures for the fog fragment shader.
+//        renderEncoder.setFragmentTexture(filteredYTexture, index: 0)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
         renderEncoder.setFragmentTexture(filteredDepthTexture, index: 2)
@@ -328,23 +484,68 @@ class Renderer {
         filteredDepthDescriptor.width = width
         filteredDepthDescriptor.height = height
         filteredDepthDescriptor.usage = [.shaderRead, .shaderWrite]
+//        filteredYTexture = device.makeTexture(descriptor: filteredDepthDescriptor)
         filteredDepthTexture = device.makeTexture(descriptor: filteredDepthDescriptor)
-        blurFilter = MPSImageGaussianBlur(device: device, sigma: 5)
+        downsizeFilter = MPSImageLanczosScale(device: device)
+    }
+    
+    // Sets up a filter to process the depth texture.
+    func setupYFilter(width: Int, height: Int) {
+        // Create a destination backing-store to hold the blurred result.
+        let filteredYDescriptor = MTLTextureDescriptor()
+        filteredYDescriptor.pixelFormat = .r8Unorm
+        filteredYDescriptor.width = width
+        filteredYDescriptor.height = height
+        filteredYDescriptor.usage = [.shaderRead, .shaderWrite]
+        filteredYTexture = device.makeTexture(descriptor: filteredYDescriptor)
+//        blurFilter = MPSImageGaussianBlur(device: device, sigma: 8)
+        let luminanceWeights: [Float] = [ 0.333, 0.334, 0.333 ]
+        sobelFilter = MPSImageSobel(device: device)
+    }
+    
+    // Sets up a filter to process the depth texture.
+    func setupLines(width: Int, height: Int) {
+        // Create a destination backing-store to hold the blurred result.
+        let lineDescriptor = MTLTextureDescriptor()
+        lineDescriptor.pixelFormat = .r8Unorm
+        lineDescriptor.width = width
+        lineDescriptor.height = height
+        lineDescriptor.usage = [.shaderRead, .shaderWrite]
+        lineTexture = device.makeTexture(descriptor: lineDescriptor)
     }
     
     // Schedules the depth texture to be blurred on the GPU using the `blurFilter`.
     func applyGaussianBlur(commandBuffer: MTLCommandBuffer) {
-        guard let arDepthTexture = depthTexture, let depthTexture = CVMetalTextureGetTexture(arDepthTexture) else {
+        guard let depthTexture = filteredYTexture else {
             print("Error: Unable to apply the MPS filter.")
             return
         }
-        guard let blur = blurFilter else {
+        guard let lancoz = downsizeFilter else {
             setupFilter(width: depthTexture.width, height: depthTexture.height)
             return
         }
         
         let inputImage = MPSImage(texture: depthTexture, featureChannels: 1)
-        let outputImage = MPSImage(texture: filteredDepthTexture, featureChannels: 1)
-        blur.encode(commandBuffer: commandBuffer, sourceImage: inputImage, destinationImage: outputImage)
+        let outputImage = MPSImage(texture: CVMetalTextureGetTexture(cameraImageTextureY! )!, featureChannels: 1)
+        lancoz.encode(commandBuffer: commandBuffer, sourceImage: inputImage, destinationImage: outputImage)
+    }
+    
+    
+    // Schedules the depth texture to be blurred on the GPU using the `blurFilter`.
+    func applySobel(commandBuffer: MTLCommandBuffer) {
+        guard let arYTexture = cameraImageTextureY, let yTexture = CVMetalTextureGetTexture(arYTexture) else {
+            print("Error: Unable to apply the MPS filter.")
+            return
+        }
+        guard let sobel = sobelFilter else {
+            setupYFilter(width: yTexture.width, height: yTexture.height)
+//            setupLines(width: yTexture.width, height: yTexture.height)
+            return
+        }
+        
+        
+        let inputImage = MPSImage(texture: yTexture, featureChannels: 1)
+        let outputImage = MPSImage(texture: filteredYTexture, featureChannels: 1)
+        sobel.encode(commandBuffer: commandBuffer, sourceImage: inputImage, destinationImage: outputImage)
     }
 }
