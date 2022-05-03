@@ -55,7 +55,9 @@ class Renderer {
     // An object that defines the Metal shaders that render the camera image and fog.
     var fogPipelineState: MTLRenderPipelineState!
     
-    var tilePipelineState: MTLRenderPipelineState!
+//    var tilePipelineState: MTLRenderPipelineState!
+    
+    var computePipelineState : MTLComputePipelineState!;
 
     // Textures used to transfer the current camera image to the GPU for rendering.
     var cameraImageTextureY: CVMetalTexture?
@@ -116,6 +118,8 @@ class Renderer {
         // Create a new command buffer for each renderpass to the current drawable.
         if let commandBuffer = commandQueue.makeCommandBuffer() {
             commandBuffer.label = "MyCommand"
+            
+            
             
             // Add completion hander which signal _inFlightSemaphore when Metal and the GPU has fully
             // finished proccssing the commands we're encoding this frame.  This indicates when the
@@ -183,10 +187,58 @@ class Renderer {
                 
                 // Schedule a present once the framebuffer is complete using the current drawable.
                 commandBuffer.present(currentDrawable)
+                
+                
+                
+            }
+            
+            
+            if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
+                computeEncoder.setComputePipelineState(computePipelineState)
+                
+                if let cameraImageY = cameraImageTextureY, let cameraImageCbCr = cameraImageTextureCbCr {
+                    
+                    let MTLTextureY = CVMetalTextureGetTexture(cameraImageY)
+                    let MTLTextureCbCr = CVMetalTextureGetTexture(cameraImageCbCr)
+                    
+                    computeEncoder.setTexture(MTLTextureY, index: 0)
+                    
+                    computeEncoder.setTexture(MTLTextureCbCr, index: 1)
+                    
+                    let threadgroupSize = MTLSizeMake(16, 16, 1);
+                    
+                    var threadgroupCount = MTLSize();
+                    
+                    threadgroupCount.width  = (MTLTextureY!.width  + threadgroupSize.width -  1) / threadgroupSize.width;
+                    threadgroupCount.height = (MTLTextureY!.height + threadgroupSize.height - 1) / threadgroupSize.height;
+                    threadgroupCount.depth = 1
+                    
+//                    threadgroupCount.width = 1900
+//                    threadgroupCount.height = 1400
+                    
+                    let w = computePipelineState.threadExecutionWidth
+                    let h = computePipelineState.maxTotalThreadsPerThreadgroup / w
+                    let threadsPerThreadgroup = MTLSizeMake(w, h, 1)
+
+                    let threadsPerGrid = MTLSize(width: MTLTextureY!.width,
+                                                 height: MTLTextureY!.height,
+                                                 depth: 1)
+                    
+                    computeEncoder.setTexture(tileOutTexture, index: 2)
+                    
+                    computeEncoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
+                    
+                }
+                
+                computeEncoder.endEncoding()
             }
             
             // Finalize rendering here & push the command buffer to the GPU.
             commandBuffer.commit()
+            
+
+            
+            
             
             
             
@@ -381,16 +433,18 @@ class Renderer {
         fogPipelineStateDescriptor.vertexFunction = fogVertexFunction
         fogPipelineStateDescriptor.fragmentFunction = fogFragmentFunction
         
-        let tileDescriptor = MTLTileRenderPipelineDescriptor();
-        tileDescriptor.tileFunction = defaultLibrary.makeFunction(name: "colorTransform")!
-        tileDescriptor.label = "Tile func"
-        tileDescriptor.colorAttachments[0].pixelFormat = renderDestination.colorPixelFormat
-        tileDescriptor.threadgroupSizeMatchesTileSize = true
+        
+        // tile stuff
+//        let tileDescriptor = MTLTileRenderPipelineDescriptor();
+//        tileDescriptor.tileFunction = defaultLibrary.makeFunction(name: "colorTransform")!
+//        tileDescriptor.label = "Tile func"
+//        tileDescriptor.colorAttachments[0].pixelFormat = renderDestination.colorPixelFormat
+//        tileDescriptor.threadgroupSizeMatchesTileSize = true
         
         
         
         
-        let tileOption = MTLPipelineOption();
+        
         
         
         fogPipelineStateDescriptor.vertexDescriptor = imagePlaneVertexDescriptor
@@ -403,11 +457,20 @@ class Renderer {
             print("Failed to create fog pipeline state, error \(error)")
         }
         
+//        var computePipeline : MTLComputePipelineState;
+//        computePipeline.label = "MyComputePipeline"
+        let f : MTLFunction = defaultLibrary.makeFunction(name: "colorTransform")!
         do {
-        try tilePipelineState = device.makeRenderPipelineState(tileDescriptor: tileDescriptor, options: tileOption, reflection: nil)
+            self.computePipelineState = try device.makeComputePipelineState(function: f)
         } catch let error {
-            print("Failed to create tile pipeline state, error \(error)")
+            print("Failed to create compute pipeline state, error \(error)")
         }
+        
+//        do {
+//        try tilePipelineState = device.makeRenderPipelineState(tileDescriptor: tileDescriptor, options: tileOption, reflection: nil)
+//        } catch let error {
+//            print("Failed to create tile pipeline state, error \(error)")
+//        }
         
         
         
@@ -535,8 +598,8 @@ class Renderer {
         renderEncoder.setVertexBuffer(imagePlaneVertexBuffer, offset: 0, index: 1)
 
         // Setup textures for the fog fragment shader.
-        renderEncoder.setFragmentTexture(filteredYTexture, index: 0)
-//        renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
+//        renderEncoder.setFragmentTexture(filteredYTexture, index: 0)
+        renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
         renderEncoder.setFragmentTexture(filteredDepthTexture, index: 2)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(confidenceTexture), index: 3)
@@ -546,16 +609,20 @@ class Renderer {
         
         renderEncoder.popDebugGroup()
         
-        renderEncoder.pushDebugGroup("TilePass")
-        renderEncoder.setRenderPipelineState(tilePipelineState)
-        // I think this sets up persistent memory for each "tile"... not sure we're gonna use it tho
-        renderEncoder.setThreadgroupMemoryLength(256, offset: 0, index: 0)
         
-        renderEncoder.setTileTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
-        renderEncoder.setTileTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
-        renderEncoder.setTileTexture(tileOutTexture, index: 2)
-        renderEncoder.dispatchThreadsPerTile(MTLSizeMake(16, 16, 1))
-        renderEncoder.popDebugGroup()
+        
+        
+        
+//        renderEncoder.pushDebugGroup("TilePass")
+//        renderEncoder.setRenderPipelineState(tilePipelineState)
+//        // I think this sets up persistent memory for each "tile"... not sure we're gonna use it tho
+//        renderEncoder.setThreadgroupMemoryLength(256, offset: 0, index: 0)
+//
+//        renderEncoder.setTileTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
+//        renderEncoder.setTileTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
+//        renderEncoder.setTileTexture(tileOutTexture, index: 2)
+//        renderEncoder.dispatchThreadsPerTile(MTLSizeMake(16, 16, 1))
+//        renderEncoder.popDebugGroup()
         
     }
     

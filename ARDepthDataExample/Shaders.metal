@@ -36,6 +36,10 @@ float4 ycbcrToRGBTransform(float4 y, float4 CbCr) {
     return ycbcrToRGBTransform * ycbcr;
 }
 
+float manhattanDistance(float4 truth, float4 test) {
+    return 0.5 * abs(truth.r - test.r) + 2.0 * abs(truth.g - test.g) + 0.5 * abs(truth.b - test.b);
+}
+
 typedef struct {
     float2 position;
     float2 texCoord;
@@ -52,11 +56,31 @@ kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[
                            texture2d<float, access::write> output [[texture(2)]],
                            uint2 gid [[thread_position_in_grid]]) {
     float4 yIn = cameraImageTextureY.read(gid);
-    float4 cbcrIn = cameraImageTextureCbCr.read(gid);
-    float4 diff = yIn - cbcrIn;
+    // yIn.r -> luma
+    float4 cbcrIn = cameraImageTextureCbCr.read(uint2(gid.x/2, gid.y/2));
+    // cbcrIn.r -> cb; cbcr.In.g -> cr
+
+    float4 yAvg = float4(0, 0, 0, 0);
     
-    diff[3] = 1.0;
-    output.write(diff, gid);
+    for (int i = -1; i < 2; i++) {
+        for (int j = -1; j < 2; j++) {
+            yAvg += cameraImageTextureY.read(uint2(gid.x + i, gid.y + j)) / 9.0;
+        }
+    }
+    
+
+    
+    float4 rgb = ycbcrToRGBTransform(
+        yAvg,
+        cbcrIn);
+    
+    float4 greenness = float4(rgb.g - (rgb.r + rgb.b) / 3, 0, 0, 1);
+    
+    
+    float manDist = max(0.0, 1.0 - manhattanDistance(float4(0.47, 0.51, 0.45, 1), rgb));
+//    diff[3] = 1.0;
+    float4 diff = yIn - cbcrIn;
+    output.write(float4(manDist, 0, 0, 1), gid);
 }
 
 // Fog the image vertex function.
@@ -106,10 +130,9 @@ texture2d<float, access::write> lineDraw [[ texture(4) ]])
     // Sample this pixel's camera image color.
     float4 rgb = ycbcrToRGBTransform(
         cameraImageTextureY.sample(s, in.texCoordCamera),
-//        float4(0.0, 0.0, 0.0, 0.0)
         cameraImageTextureCbCr.sample(s, in.texCoordCamera)
     );
-    rgb = cameraImageTextureY.sample(s, in.texCoordCamera) - cameraImageTextureCbCr.sample(s, in.texCoordCamera);
+//    rgb = cameraImageTextureY.sample(s, in.texCoordCamera) - cameraImageTextureCbCr.sample(s, in.texCoordCamera);
     half4 cameraColor = half4(rgb);
 
     
