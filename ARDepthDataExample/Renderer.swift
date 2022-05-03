@@ -276,7 +276,7 @@ class Renderer {
             
             let asUI = UIImage(cgImage: dstImage, scale: 0.0, orientation: .up)
             
-            if (m > 10) {
+            if (m >= 1) {
                 print("JAEMS")
             }
         }

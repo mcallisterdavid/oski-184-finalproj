@@ -23,6 +23,8 @@ typedef struct {
     float2 texCoord;
 } ImageColorInOut;
 
+
+
 // Convert from YCbCr to rgb.
 float4 ycbcrToRGBTransform(float4 y, float4 CbCr) {
     const float4x4 ycbcrToRGBTransform = float4x4(
@@ -38,6 +40,31 @@ float4 ycbcrToRGBTransform(float4 y, float4 CbCr) {
 
 float manhattanDistance(float4 truth, float4 test) {
     return 0.5 * abs(truth.r - test.r) + 2.0 * abs(truth.g - test.g) + 0.5 * abs(truth.b - test.b);
+}
+
+float greenness_model(float4 rgb) {
+    float r2 = rgb.r * rgb.r;
+    float g2 = rgb.g * rgb.g;
+    float b2 = rgb.b * rgb.b;
+    float dotted = -41.25229454 * rgb.r + 48.47907676 * rgb.g + 35.03935425 * rgb.b - 49.15164922 * r2 + 98.77229899 * g2 - 81.02268637 * b2 - 17.147;
+    float greenness = 1.0 / (1.0 + exp(0.0 - dotted));
+//    if (greenness > 0.275) {
+//        greenness = 1;
+//    } else {
+//        greenness = 0;
+//    }
+    return greenness > 0.275 ? 1.0 : 0.0;
+}
+
+float whiteness_model(float4 rgb) {
+    float r2 = rgb.r * rgb.r;
+    float g2 = rgb.g * rgb.g;
+    float b2 = rgb.b * rgb.b;
+    float dotted = -8.67260227 * rgb.r - 31.35452913 * rgb.g + 38.64 * rgb.b - 7.57657822 * r2 - 42.85956885 * g2 + 65.68466432 * b2 - 3.035;
+    float whiteness = 1.0 / (1.0 + exp(0.0 - dotted));
+    whiteness -= 0.45;
+    whiteness *= 2;
+    return whiteness > 0.4 ? 1.0 : 0.0;
 }
 
 typedef struct {
@@ -59,28 +86,96 @@ kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[
     // yIn.r -> luma
     float4 cbcrIn = cameraImageTextureCbCr.read(uint2(gid.x/2, gid.y/2));
     // cbcrIn.r -> cb; cbcr.In.g -> cr
-
-    float4 yAvg = float4(0, 0, 0, 0);
+    
+//    for (int i = -1; i < 2; i++) {
+//        for (int j = -1; j < 2; j++) {
+//            yAvg += cameraImageTextureY.read(uint2(gid.x + i, gid.y + j)) / 9.0;
+//        }
+//    }
+    
+    const float3x3 sobel_kernel_x = float3x3(
+    float3(1.0f, 0.0f, -1.0f),
+    float3(2.0f, 0.0f, -2.0f),
+    float3(1.0f, 0.0f, -1.0f));
+    
+    
+    
+    const float3x3 sobel_kernel_y = float3x3(
+    float3(1.0, 2.0, 1.0),
+    float3(0, 0, 0),
+    float3(-1.0, -2.0, -1.0));
+    
+    float sobel_x = 0.0;
+    
+//    float4 curr_y;
+//    float4 curr_cbcr;
+//    float4 curr_rgb;
+//    float curr;
+//
+//    curr_y = cameraImageTextureY.read(uint2(gid.x - 1, gid.y));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x - 1) / 2, (gid.y) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    curr = greenness_model(curr_rgb);
+//    curr -= whiteness_model(curr_rgb);
+//    sobel_x += curr * 2.0;
+//
+//    curr_y = cameraImageTextureY.read(uint2(gid.x + 1, gid.y));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + 1) / 2, (gid.y) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    curr = greenness_model(curr_rgb);
+//    curr -= whiteness_model(curr_rgb);
+//    sobel_x -= curr * 2.0;
+//
+//    curr_y = cameraImageTextureY.read(uint2(gid.x - 1, gid.y + 1));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x - 1) / 2, (gid.y + 1) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    curr = greenness_model(curr_rgb);
+//    curr -= whiteness_model(curr_rgb);
+//    sobel_x += curr * 1.0;
+//
+//    curr_y = cameraImageTextureY.read(uint2(gid.x + 1, gid.y + 1));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + 1) / 2, (gid.y + 1) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    curr = greenness_model(curr_rgb);
+//    curr -= whiteness_model(curr_rgb);
+//    sobel_x -= curr * 1.0;
+//
+//    curr_y = cameraImageTextureY.read(uint2(gid.x - 1, gid.y - 1));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x - 1) / 2, (gid.y - 1) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    curr = greenness_model(curr_rgb);
+//    curr -= whiteness_model(curr_rgb);
+//    sobel_x += curr * 1.0;
+//
+//    curr_y = cameraImageTextureY.read(uint2(gid.x + 1, gid.y - 1));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + 1) / 2, (gid.y - 1) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    curr = greenness_model(curr_rgb);
+//    curr -= whiteness_model(curr_rgb);
+//    sobel_x -= curr * 1.0;
+    
+    
     
     for (int i = -1; i < 2; i++) {
         for (int j = -1; j < 2; j++) {
-            yAvg += cameraImageTextureY.read(uint2(gid.x + i, gid.y + j)) / 9.0;
+            float4 curr_y = cameraImageTextureY.read(uint2(gid.x + i, gid.y + j));
+            float4 curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + i) / 2, (gid.y + j) / 2));
+            float4 curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+            float curr = greenness_model(curr_rgb);
+            curr -= whiteness_model(curr_rgb);
+            sobel_x += curr;
         }
     }
     
-
+//    float4 rgb = ycbcrToRGBTransform(
+//        yIn,
+//        cbcrIn);
+//
+//
+//    bool greenness = greenness_model(rgb);
+//    bool whiteness = whiteness_model(rgb);
     
-    float4 rgb = ycbcrToRGBTransform(
-        yAvg,
-        cbcrIn);
-    
-    float4 greenness = float4(rgb.g - (rgb.r + rgb.b) / 3, 0, 0, 1);
-    
-    
-    float manDist = max(0.0, 1.0 - manhattanDistance(float4(0.47, 0.51, 0.45, 1), rgb));
-//    diff[3] = 1.0;
-    float4 diff = yIn - cbcrIn;
-    output.write(float4(manDist, 0, 0, 1), gid);
+    output.write(float4(sobel_x / 9.0, 0, 0, 1), gid);
 }
 
 // Fog the image vertex function.
