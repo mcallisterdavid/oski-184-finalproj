@@ -54,6 +54,7 @@ kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[
     float4 yIn = cameraImageTextureY.read(gid);
     float4 cbcrIn = cameraImageTextureCbCr.read(gid);
     float4 diff = yIn - cbcrIn;
+    
     diff[3] = 1.0;
     output.write(diff, gid);
 }
@@ -110,6 +111,7 @@ texture2d<float, access::write> lineDraw [[ texture(4) ]])
     );
     rgb = cameraImageTextureY.sample(s, in.texCoordCamera) - cameraImageTextureCbCr.sample(s, in.texCoordCamera);
     half4 cameraColor = half4(rgb);
+
     
 
     // Sample this pixel's depth value.

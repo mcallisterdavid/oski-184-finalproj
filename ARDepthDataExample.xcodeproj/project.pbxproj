@@ -338,6 +338,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				PRIVATE_HEADERS_FOLDER_PATH = "";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.apple-samplecode.ARDepthDataExample${SAMPLE_CODE_DISAMBIGUATOR}";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -363,6 +364,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				PRIVATE_HEADERS_FOLDER_PATH = "";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.example.apple-samplecode.ARDepthDataExample${SAMPLE_CODE_DISAMBIGUATOR}";
 				PRODUCT_NAME = "$(TARGET_NAME)";

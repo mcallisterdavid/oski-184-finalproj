@@ -54,6 +54,8 @@ class Renderer {
     
     // An object that defines the Metal shaders that render the camera image and fog.
     var fogPipelineState: MTLRenderPipelineState!
+    
+    var tilePipelineState: MTLRenderPipelineState!
 
     // Textures used to transfer the current camera image to the GPU for rendering.
     var cameraImageTextureY: CVMetalTexture?
@@ -69,6 +71,8 @@ class Renderer {
     var filteredDepthTexture: MTLTexture!
     
     var filteredYTexture: MTLTexture!
+    
+    var tileOutTexture: MTLTexture!
     
     var lineTexture: MTLTexture!
     
@@ -130,7 +134,8 @@ class Renderer {
 //            applyGaussianBlur(commandBuffer: commandBuffer)
             if (frameProcessed && filteredYTexture != nil) {
                 frameProcessed = false
-                Task.init{await findLines()}
+                Task.init{await readTileOut()}
+//                Task.init{await findLines()}
             }
             
             
@@ -138,6 +143,8 @@ class Renderer {
             
             
             // Pass the depth and confidence pixel buffers to the GPU to shade-in the fog.
+            
+            
             if let renderPassDescriptor = renderDestination.currentRenderPassDescriptor, let currentDrawable = renderDestination.currentDrawable {
 //                let computeEncoder = commandBuffer.makeComputeCommandEncoder()
 //                if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
@@ -152,14 +159,16 @@ class Renderer {
 //                    computeEncoder.setTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
 //                    computeEncoder.setTexture(filteredYTexture, index: 2)
 //
-////                    let threadGroupSize = MTLSizeMake(16, 16, 1)
-////                    let threadGroupCount = MTLSizeMake(filteredYTexture.width)
-//
-//
-//                    computeEncoder.endEncoding()
-//
-//                }
+//               let threadGroupSize = MTLSizeMake(16, 16, 1)
+//                    let threadGroupCount = MTLSizeMake(filteredYTexture.width)
+                
+                
+                // Check these values
+                renderPassDescriptor.tileWidth = 16
+                renderPassDescriptor.tileHeight = 16
+                renderPassDescriptor.threadgroupMemoryLength = 256
 
+                
                 if let fogRenderEncoding = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
                     
                     // Set a label to identify this render pass in a captured Metal frame.
@@ -184,8 +193,48 @@ class Renderer {
         }
     }
     
+    func readTileOut() async {
+        if (tileOutTexture != nil) {
+            let tex = tileOutTexture!
+            
+            let bytesPerPixel = 1
+            
+            let bytesPerRow = tex.width * bytesPerPixel
+            
+            var data = [UInt8](repeating: 0, count: tex.width*tex.height)
+            
+            tex.getBytes(&data,
+                bytesPerRow: bytesPerRow,
+                from: MTLRegionMake2D(0, 0, tex.width, tex.height),
+                mipmapLevel: 0)
+            
+            
+            let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
+            let bitsPerComponent = 8
+            let colorSpace = CGColorSpaceCreateDeviceGray()
+            let context = CGContext(data: &data, width: tex.width, height: tex.height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo.rawValue)
+            
+            let m = data.max()!
+
+            // Creates the image from the graphics context
+            guard let dstImage = context?.makeImage() else { print("FAILED TO MAKE IMG")
+                return
+            }
+            
+            
+            let asUI = UIImage(cgImage: dstImage, scale: 0.0, orientation: .up)
+            
+            if (m > 10) {
+                print("JAEMS")
+            }
+        }
+    }
+    
     
     func findLines() async {
+        
+        
+        
         if (filteredYTexture != nil) {
             
             let tex = filteredYTexture!
@@ -331,6 +380,19 @@ class Renderer {
         fogPipelineStateDescriptor.sampleCount = renderDestination.sampleCount
         fogPipelineStateDescriptor.vertexFunction = fogVertexFunction
         fogPipelineStateDescriptor.fragmentFunction = fogFragmentFunction
+        
+        let tileDescriptor = MTLTileRenderPipelineDescriptor();
+        tileDescriptor.tileFunction = defaultLibrary.makeFunction(name: "colorTransform")!
+        tileDescriptor.label = "Tile func"
+        tileDescriptor.colorAttachments[0].pixelFormat = renderDestination.colorPixelFormat
+        tileDescriptor.threadgroupSizeMatchesTileSize = true
+        
+        
+        
+        
+        let tileOption = MTLPipelineOption();
+        
+        
         fogPipelineStateDescriptor.vertexDescriptor = imagePlaneVertexDescriptor
         fogPipelineStateDescriptor.colorAttachments[0].pixelFormat = renderDestination.colorPixelFormat
 
@@ -340,6 +402,15 @@ class Renderer {
         } catch let error {
             print("Failed to create fog pipeline state, error \(error)")
         }
+        
+        do {
+        try tilePipelineState = device.makeRenderPipelineState(tileDescriptor: tileDescriptor, options: tileOption, reflection: nil)
+        } catch let error {
+            print("Failed to create tile pipeline state, error \(error)")
+        }
+        
+        
+        
         
         // Create the command queue for one frame of rendering work.
         commandQueue = device.makeCommandQueue()
@@ -464,14 +535,28 @@ class Renderer {
         renderEncoder.setVertexBuffer(imagePlaneVertexBuffer, offset: 0, index: 1)
 
         // Setup textures for the fog fragment shader.
-//        renderEncoder.setFragmentTexture(filteredYTexture, index: 0)
-        renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
+        renderEncoder.setFragmentTexture(filteredYTexture, index: 0)
+//        renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
         renderEncoder.setFragmentTexture(filteredDepthTexture, index: 2)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(confidenceTexture), index: 3)
         // Draw final quad to display
         renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        
+        
         renderEncoder.popDebugGroup()
+        
+        renderEncoder.pushDebugGroup("TilePass")
+        renderEncoder.setRenderPipelineState(tilePipelineState)
+        // I think this sets up persistent memory for each "tile"... not sure we're gonna use it tho
+        renderEncoder.setThreadgroupMemoryLength(256, offset: 0, index: 0)
+        
+        renderEncoder.setTileTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
+        renderEncoder.setTileTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
+        renderEncoder.setTileTexture(tileOutTexture, index: 2)
+        renderEncoder.dispatchThreadsPerTile(MTLSizeMake(16, 16, 1))
+        renderEncoder.popDebugGroup()
+        
     }
     
     // MARK: - MPS Filter
@@ -498,6 +583,14 @@ class Renderer {
         filteredYDescriptor.height = height
         filteredYDescriptor.usage = [.shaderRead, .shaderWrite]
         filteredYTexture = device.makeTexture(descriptor: filteredYDescriptor)
+        
+        let tileOutDescriptor = MTLTextureDescriptor()
+        tileOutDescriptor.pixelFormat = .r8Unorm
+        tileOutDescriptor.width = width
+        tileOutDescriptor.height = height
+        tileOutDescriptor.usage = [.shaderRead, .shaderWrite]
+        tileOutTexture = device.makeTexture(descriptor: tileOutDescriptor)
+        
 //        blurFilter = MPSImageGaussianBlur(device: device, sigma: 8)
         let luminanceWeights: [Float] = [ 0.333, 0.334, 0.333 ]
         sobelFilter = MPSImageSobel(device: device)
