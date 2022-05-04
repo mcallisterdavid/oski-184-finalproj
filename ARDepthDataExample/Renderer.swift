@@ -58,6 +58,8 @@ class Renderer {
 //    var tilePipelineState: MTLRenderPipelineState!
     
     var computePipelineState : MTLComputePipelineState!;
+    
+    var cleanComputePipelineState : MTLComputePipelineState!;
 
     // Textures used to transfer the current camera image to the GPU for rendering.
     var cameraImageTextureY: CVMetalTexture?
@@ -75,6 +77,8 @@ class Renderer {
     var filteredYTexture: MTLTexture!
     
     var tileOutTexture: MTLTexture!
+    
+    var cleanOutTexture: MTLTexture!
     
     var lineTexture: MTLTexture!
     
@@ -134,19 +138,9 @@ class Renderer {
             updateAppState()
             
             
-            applySobel(commandBuffer: commandBuffer)
+//            applySobel(commandBuffer: commandBuffer)
 //            applyGaussianBlur(commandBuffer: commandBuffer)
-            if (frameProcessed && filteredYTexture != nil) {
-                frameProcessed = false
-                Task.init{await readTileOut()}
-//                Task.init{await findLines()}
-            }
             
-            
-            
-            
-            
-            // Pass the depth and confidence pixel buffers to the GPU to shade-in the fog.
             
             
             if let renderPassDescriptor = renderDestination.currentRenderPassDescriptor, let currentDrawable = renderDestination.currentDrawable {
@@ -201,6 +195,10 @@ class Renderer {
                     let MTLTextureY = CVMetalTextureGetTexture(cameraImageY)
                     let MTLTextureCbCr = CVMetalTextureGetTexture(cameraImageCbCr)
                     
+                    if (tileOutTexture == nil) {
+                        setupYFilter(width: MTLTextureY!.width, height: MTLTextureY!.height)
+                    }
+                    
                     computeEncoder.setTexture(MTLTextureY, index: 0)
                     
                     computeEncoder.setTexture(MTLTextureCbCr, index: 1)
@@ -212,9 +210,6 @@ class Renderer {
                     threadgroupCount.width  = (MTLTextureY!.width  + threadgroupSize.width -  1) / threadgroupSize.width;
                     threadgroupCount.height = (MTLTextureY!.height + threadgroupSize.height - 1) / threadgroupSize.height;
                     threadgroupCount.depth = 1
-                    
-//                    threadgroupCount.width = 1900
-//                    threadgroupCount.height = 1400
                     
                     let w = computePipelineState.threadExecutionWidth
                     let h = computePipelineState.maxTotalThreadsPerThreadgroup / w
@@ -230,13 +225,56 @@ class Renderer {
                     
                 }
                 
+                
                 computeEncoder.endEncoding()
             }
+            
+            if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
+                computeEncoder.setComputePipelineState(cleanComputePipelineState)
+
+                if let greenWhiteIn = tileOutTexture {
+
+
+                    computeEncoder.setTexture(tileOutTexture, index: 0)
+
+                    let threadgroupSize = MTLSizeMake(16, 16, 1);
+
+                    var threadgroupCount = MTLSize();
+
+                    threadgroupCount.width  = (tileOutTexture.width  + threadgroupSize.width -  1) / threadgroupSize.width;
+                    threadgroupCount.height = (tileOutTexture.height + threadgroupSize.height - 1) / threadgroupSize.height;
+                    threadgroupCount.depth = 1
+
+                    let w = cleanComputePipelineState.threadExecutionWidth
+                    let h = cleanComputePipelineState.maxTotalThreadsPerThreadgroup / w
+                    let threadsPerThreadgroup = MTLSizeMake(w, h, 1)
+
+                    let threadsPerGrid = MTLSize(width: tileOutTexture.width,
+                                                 height: tileOutTexture.height,
+                                                 depth: 1)
+
+                    computeEncoder.setTexture(cleanOutTexture, index: 1)
+
+                    computeEncoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
+
+                }
+
+                computeEncoder.endEncoding()
+            }
+            
+            applySobel(commandBuffer: commandBuffer)
             
             // Finalize rendering here & push the command buffer to the GPU.
             commandBuffer.commit()
             
+            commandBuffer.addCompletedHandler({_ in
+                if (self.cleanOutTexture != nil && frameProcessed) {
+                    frameProcessed = false
+                    Task.init{await self.readTileOut()}
+    //                Task.init{await findLines()}
 
+                }
+            })
             
             
             
@@ -246,8 +284,8 @@ class Renderer {
     }
     
     func readTileOut() async {
-        if (tileOutTexture != nil) {
-            let tex = tileOutTexture!
+        if (cleanOutTexture != nil) {
+            let tex = cleanOutTexture!
             
             let bytesPerPixel = 1
             
@@ -286,7 +324,6 @@ class Renderer {
     func findLines() async {
         
         
-        
         if (filteredYTexture != nil) {
             
             let tex = filteredYTexture!
@@ -321,8 +358,8 @@ class Renderer {
             print("TRANSFORMING")
             let hough = houghSpace(image: asUI, data: data)
             print("FINDING PEAKS")
-            newLines = peakLines(houghSpace: hough, n: 20)
-            let imageWithLines = draw(lines: newLines, inImage: asUI, color: .white)
+            newLines = peakLines(houghSpace: hough, n: 1)
+            let imageWithLines = draw(lines: newLines, inImage: asUI, color: .red)
             lineUpdate += 1
             frameProcessed = true
             if (m > 10) {
@@ -443,10 +480,6 @@ class Renderer {
         
         
         
-        
-        
-        
-        
         fogPipelineStateDescriptor.vertexDescriptor = imagePlaneVertexDescriptor
         fogPipelineStateDescriptor.colorAttachments[0].pixelFormat = renderDestination.colorPixelFormat
 
@@ -466,6 +499,12 @@ class Renderer {
             print("Failed to create compute pipeline state, error \(error)")
         }
         
+        let f2 : MTLFunction = defaultLibrary.makeFunction(name: "imageClean")!
+        do {
+            self.cleanComputePipelineState = try device.makeComputePipelineState(function: f2)
+        } catch let error {
+            print("Failed to create second compute pipeline state, error \(error)")
+        }
 //        do {
 //        try tilePipelineState = device.makeRenderPipelineState(tileDescriptor: tileDescriptor, options: tileOption, reflection: nil)
 //        } catch let error {
@@ -598,8 +637,9 @@ class Renderer {
         renderEncoder.setVertexBuffer(imagePlaneVertexBuffer, offset: 0, index: 1)
 
         // Setup textures for the fog fragment shader.
+        renderEncoder.setFragmentTexture(cleanOutTexture, index: 0)
 //        renderEncoder.setFragmentTexture(filteredYTexture, index: 0)
-        renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
+//        renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
         renderEncoder.setFragmentTexture(filteredDepthTexture, index: 2)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(confidenceTexture), index: 3)
@@ -609,20 +649,6 @@ class Renderer {
         
         renderEncoder.popDebugGroup()
         
-        
-        
-        
-        
-//        renderEncoder.pushDebugGroup("TilePass")
-//        renderEncoder.setRenderPipelineState(tilePipelineState)
-//        // I think this sets up persistent memory for each "tile"... not sure we're gonna use it tho
-//        renderEncoder.setThreadgroupMemoryLength(256, offset: 0, index: 0)
-//
-//        renderEncoder.setTileTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
-//        renderEncoder.setTileTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
-//        renderEncoder.setTileTexture(tileOutTexture, index: 2)
-//        renderEncoder.dispatchThreadsPerTile(MTLSizeMake(16, 16, 1))
-//        renderEncoder.popDebugGroup()
         
     }
     
@@ -657,6 +683,13 @@ class Renderer {
         tileOutDescriptor.height = height
         tileOutDescriptor.usage = [.shaderRead, .shaderWrite]
         tileOutTexture = device.makeTexture(descriptor: tileOutDescriptor)
+        
+        let cleanOutDescriptor = MTLTextureDescriptor()
+        cleanOutDescriptor.pixelFormat = .r8Unorm
+        cleanOutDescriptor.width = width
+        cleanOutDescriptor.height = height
+        cleanOutDescriptor.usage = [.shaderRead, .shaderWrite]
+        cleanOutTexture = device.makeTexture(descriptor: cleanOutDescriptor)
         
 //        blurFilter = MPSImageGaussianBlur(device: device, sigma: 8)
         let luminanceWeights: [Float] = [ 0.333, 0.334, 0.333 ]
@@ -693,15 +726,11 @@ class Renderer {
     
     // Schedules the depth texture to be blurred on the GPU using the `blurFilter`.
     func applySobel(commandBuffer: MTLCommandBuffer) {
-        guard let arYTexture = cameraImageTextureY, let yTexture = CVMetalTextureGetTexture(arYTexture) else {
+        guard let yTexture = tileOutTexture else {
             print("Error: Unable to apply the MPS filter.")
             return
         }
-        guard let sobel = sobelFilter else {
-            setupYFilter(width: yTexture.width, height: yTexture.height)
-//            setupLines(width: yTexture.width, height: yTexture.height)
-            return
-        }
+        let sobel = sobelFilter!
         
         
         let inputImage = MPSImage(texture: yTexture, featureChannels: 1)

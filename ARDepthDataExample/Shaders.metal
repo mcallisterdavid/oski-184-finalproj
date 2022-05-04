@@ -78,6 +78,13 @@ typedef struct {
     float2 texCoordScene;
 } FogColorInOut;
 
+kernel void imageClean(texture2d<float, access::read> greenWhiteDiff [[texture(0)]],
+                       texture2d<float, access::write> output [[texture(1)]],
+                       uint2 gid [[thread_position_in_grid]]) {
+    float4 imageIn = greenWhiteDiff.read(gid);
+    output.write(imageIn / 2.0, gid);
+}
+
 kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[texture(0)]],
                            texture2d<float, access::read> cameraImageTextureCbCr [[texture(1)]],
                            texture2d<float, access::write> output [[texture(2)]],
@@ -93,68 +100,7 @@ kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[
 //        }
 //    }
     
-    const float3x3 sobel_kernel_x = float3x3(
-    float3(1.0f, 0.0f, -1.0f),
-    float3(2.0f, 0.0f, -2.0f),
-    float3(1.0f, 0.0f, -1.0f));
-    
-    
-    
-    const float3x3 sobel_kernel_y = float3x3(
-    float3(1.0, 2.0, 1.0),
-    float3(0, 0, 0),
-    float3(-1.0, -2.0, -1.0));
-    
     float sobel_x = 0.0;
-    
-//    float4 curr_y;
-//    float4 curr_cbcr;
-//    float4 curr_rgb;
-//    float curr;
-//
-//    curr_y = cameraImageTextureY.read(uint2(gid.x - 1, gid.y));
-//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x - 1) / 2, (gid.y) / 2));
-//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
-//    curr = greenness_model(curr_rgb);
-//    curr -= whiteness_model(curr_rgb);
-//    sobel_x += curr * 2.0;
-//
-//    curr_y = cameraImageTextureY.read(uint2(gid.x + 1, gid.y));
-//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + 1) / 2, (gid.y) / 2));
-//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
-//    curr = greenness_model(curr_rgb);
-//    curr -= whiteness_model(curr_rgb);
-//    sobel_x -= curr * 2.0;
-//
-//    curr_y = cameraImageTextureY.read(uint2(gid.x - 1, gid.y + 1));
-//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x - 1) / 2, (gid.y + 1) / 2));
-//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
-//    curr = greenness_model(curr_rgb);
-//    curr -= whiteness_model(curr_rgb);
-//    sobel_x += curr * 1.0;
-//
-//    curr_y = cameraImageTextureY.read(uint2(gid.x + 1, gid.y + 1));
-//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + 1) / 2, (gid.y + 1) / 2));
-//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
-//    curr = greenness_model(curr_rgb);
-//    curr -= whiteness_model(curr_rgb);
-//    sobel_x -= curr * 1.0;
-//
-//    curr_y = cameraImageTextureY.read(uint2(gid.x - 1, gid.y - 1));
-//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x - 1) / 2, (gid.y - 1) / 2));
-//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
-//    curr = greenness_model(curr_rgb);
-//    curr -= whiteness_model(curr_rgb);
-//    sobel_x += curr * 1.0;
-//
-//    curr_y = cameraImageTextureY.read(uint2(gid.x + 1, gid.y - 1));
-//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + 1) / 2, (gid.y - 1) / 2));
-//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
-//    curr = greenness_model(curr_rgb);
-//    curr -= whiteness_model(curr_rgb);
-//    sobel_x -= curr * 1.0;
-    
-    
     
     for (int i = -1; i < 2; i++) {
         for (int j = -1; j < 2; j++) {
@@ -166,14 +112,6 @@ kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[
             sobel_x += curr;
         }
     }
-    
-//    float4 rgb = ycbcrToRGBTransform(
-//        yIn,
-//        cbcrIn);
-//
-//
-//    bool greenness = greenness_model(rgb);
-//    bool whiteness = whiteness_model(rgb);
     
     output.write(float4(sobel_x / 9.0, 0, 0, 1), gid);
 }
@@ -227,7 +165,9 @@ texture2d<float, access::write> lineDraw [[ texture(4) ]])
         cameraImageTextureY.sample(s, in.texCoordCamera),
         cameraImageTextureCbCr.sample(s, in.texCoordCamera)
     );
-//    rgb = cameraImageTextureY.sample(s, in.texCoordCamera) - cameraImageTextureCbCr.sample(s, in.texCoordCamera);
+    float edge = cameraImageTextureY.sample(s, in.texCoordCamera).r;
+    
+    rgb = float4(edge, edge, edge, 1);
     half4 cameraColor = half4(rgb);
 
     
