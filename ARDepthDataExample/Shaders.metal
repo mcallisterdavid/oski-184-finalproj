@@ -10,6 +10,7 @@ The sample app's shaders.
 
 // Include header shared between this Metal shader code and C code executing Metal API commands. 
 #import "ShaderTypes.h"
+#import  "../Loki/loki_header.metal"
 
 using namespace metal;
 
@@ -78,11 +79,43 @@ typedef struct {
     float2 texCoordScene;
 } FogColorInOut;
 
+
 kernel void imageClean(texture2d<float, access::read> greenWhiteDiff [[texture(0)]],
                        texture2d<float, access::write> output [[texture(1)]],
                        uint2 gid [[thread_position_in_grid]]) {
     float4 imageIn = greenWhiteDiff.read(gid);
-    output.write(imageIn / 2.0, gid);
+
+    // threshold for doing random sampling
+    float threshold = 0.5;
+
+    // random number generator
+    Loki rng = Loki(gid.x, gid.y, imageIn[0]);
+    // radius for random sampling
+    int r = 5;
+    // number of random samples
+    int n = 20;
+
+    if (imageIn[0] > threshold) {
+        int count = 0; // how many samples are white
+        for (int i = 0; i < n; i++) {
+            float rng_angle = rng.rand() * 2.0;
+            float rng_radius = rng.rand() * r;
+            int sample_x = floor(gid.x + cospi(rng_angle) * rng_radius);
+            int sample_y = floor(gid.y + sinpi(rng_angle) * rng_radius);
+            float4 sample = greenWhiteDiff.read(uint2(sample_x, sample_y));
+            if (sample[0] > threshold)
+                count += 1;
+        }
+        if (count > n / 2) {
+            output.write(1.0, gid);
+        } else {
+            output.write(0.0, gid);
+        }
+
+    } else {
+        output.write(0.0, gid);
+    }
+//    output.write(imageIn[0], gid);
 }
 
 kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[texture(0)]],

@@ -14,6 +14,8 @@
 		11FD6F5722835A6B00775EAA /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 11FD6F5522835A6B00775EAA /* Main.storyboard */; };
 		11FD6F5922835A6B00775EAA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 11FD6F5822835A6B00775EAA /* Assets.xcassets */; };
 		11FD6F5C22835A6B00775EAA /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 11FD6F5A22835A6B00775EAA /* LaunchScreen.storyboard */; };
+		5C2D7D0E2822533300500165 /* loki.metal in Sources */ = {isa = PBXBuildFile; fileRef = 5C2D7D0C2822533300500165 /* loki.metal */; };
+		5C2D7D0F2822533300500165 /* loki_header.metal in Sources */ = {isa = PBXBuildFile; fileRef = 5C2D7D0D2822533300500165 /* loki_header.metal */; };
 		718E55BA2289C30A00A9B13B /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 718E55B92289C30A00A9B13B /* README.md */; };
 		7B77D3E32818D6E700A289BC /* hough.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B77D3E22818D6E700A289BC /* hough.swift */; };
 /* End PBXBuildFile section */
@@ -31,6 +33,9 @@
 		11FD6F5D22835A6B00775EAA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		11FD6F5E22835A6B00775EAA /* ARDepthDataExampleSwift-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ARDepthDataExampleSwift-Bridging-Header.h"; sourceTree = "<group>"; };
 		2B5028A212BE319A0620E134 /* SampleCode.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = SampleCode.xcconfig; path = Configuration/SampleCode.xcconfig; sourceTree = "<group>"; };
+		5C2D7D0828224CE700500165 /* AR Session 2.mov */ = {isa = PBXFileReference; lastKnownFileType = video.quicktime; name = "AR Session 2.mov"; path = "../../../Downloads/AR Session 2.mov"; sourceTree = "<group>"; };
+		5C2D7D0C2822533300500165 /* loki.metal */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.metal; path = loki.metal; sourceTree = "<group>"; };
+		5C2D7D0D2822533300500165 /* loki_header.metal */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.metal; path = loki_header.metal; sourceTree = "<group>"; };
 		718E55B92289C30A00A9B13B /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		7B77D3E22818D6E700A289BC /* hough.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = hough.swift; sourceTree = "<group>"; };
 		7B77D3E42818D71D00A289BC /* AR Session 11.mov */ = {isa = PBXFileReference; lastKnownFileType = video.quicktime; name = "AR Session 11.mov"; path = "../AR Session 11.mov"; sourceTree = "<group>"; };
@@ -52,9 +57,11 @@
 		11FD6F4022835A6B00775EAA = {
 			isa = PBXGroup;
 			children = (
+				5C2D7D0828224CE700500165 /* AR Session 2.mov */,
 				7BD4AA872821EF35000B790A /* AR Session 5.mov */,
 				7B77D3E42818D71D00A289BC /* AR Session 11.mov */,
 				718E55B92289C30A00A9B13B /* README.md */,
+				5C2D7D0B2822533300500165 /* Loki */,
 				11FD6F4B22835A6B00775EAA /* ARDepthDataExample */,
 				11FD6F4A22835A6B00775EAA /* Products */,
 				46FF067DEC8D5FBEC3E65789 /* Configuration */,
@@ -94,6 +101,15 @@
 				2B5028A212BE319A0620E134 /* SampleCode.xcconfig */,
 			);
 			name = Configuration;
+			sourceTree = "<group>";
+		};
+		5C2D7D0B2822533300500165 /* Loki */ = {
+			isa = PBXGroup;
+			children = (
+				5C2D7D0C2822533300500165 /* loki.metal */,
+				5C2D7D0D2822533300500165 /* loki_header.metal */,
+			);
+			path = Loki;
 			sourceTree = "<group>";
 		};
 		A4415912580145BD9ADC7D95 /* LICENSE */ = {
@@ -177,9 +193,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				11FD6F4F22835A6B00775EAA /* Shaders.metal in Sources */,
+				5C2D7D0F2822533300500165 /* loki_header.metal in Sources */,
 				11FD6F5222835A6B00775EAA /* Renderer.swift in Sources */,
 				7B77D3E32818D6E700A289BC /* hough.swift in Sources */,
 				11FD6F5422835A6B00775EAA /* ViewController.swift in Sources */,
+				5C2D7D0E2822533300500165 /* loki.metal in Sources */,
 				11FD6F4D22835A6B00775EAA /* AppDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -333,7 +351,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = CTTY7945V3;
+				DEVELOPMENT_TEAM = TJB7VL43BV;
 				INFOPLIST_FILE = ARDepthDataExample/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -359,7 +377,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = CTTY7945V3;
+				DEVELOPMENT_TEAM = TJB7VL43BV;
 				INFOPLIST_FILE = ARDepthDataExample/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
 				LD_RUNPATH_SEARCH_PATHS = (
