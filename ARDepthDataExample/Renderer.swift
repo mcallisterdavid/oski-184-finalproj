@@ -60,6 +60,8 @@ class Renderer {
     var computePipelineState : MTLComputePipelineState!;
     
     var cleanComputePipelineState : MTLComputePipelineState!;
+    
+    var logoComputePipelineState : MTLComputePipelineState!;
 
     // Textures used to transfer the current camera image to the GPU for rendering.
     var cameraImageTextureY: CVMetalTexture?
@@ -81,6 +83,9 @@ class Renderer {
     var cleanOutTexture: MTLTexture!
     
     var calLogoTexture: MTLTexture!
+    
+    // Texture of height 2 storing the top and bottom y values for each vertical strip of the callogotexture
+    var topBottomTexture: MTLTexture!
     
     var lineTexture: MTLTexture!
     
@@ -265,7 +270,40 @@ class Renderer {
                 computeEncoder.endEncoding()
             }
             
-            applySobel(commandBuffer: commandBuffer)
+            if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
+                computeEncoder.setComputePipelineState(logoComputePipelineState)
+
+                if let logoTex = calLogoTexture {
+
+
+                    computeEncoder.setTexture(calLogoTexture, index: 0)
+
+                    let threadgroupSize = MTLSizeMake(16, 16, 1);
+
+                    var threadgroupCount = MTLSize();
+
+                    threadgroupCount.width  = (logoTex.width  + threadgroupSize.width -  1) / threadgroupSize.width;
+                    threadgroupCount.height = 1;
+                    threadgroupCount.depth = 1
+
+                    let w = logoComputePipelineState.threadExecutionWidth
+                    let h = logoComputePipelineState.maxTotalThreadsPerThreadgroup / w
+                    let threadsPerThreadgroup = MTLSizeMake(w, h, 1)
+
+                    let threadsPerGrid = MTLSize(width: calLogoTexture.width,
+                                                 height: 1,
+                                                 depth: 1)
+
+                    computeEncoder.setTexture(topBottomTexture, index: 1)
+
+                    computeEncoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
+
+                }
+
+                computeEncoder.endEncoding()
+            }
+            
+//            applySobel(commandBuffer: commandBuffer)
             
             // Finalize rendering here & push the command buffer to the GPU.
             commandBuffer.commit()
@@ -277,6 +315,9 @@ class Renderer {
 //                    Task.init{await self.findLines()}
 
                 }
+                if (self.calLogoTexture != nil) {
+                    self.logoPointDetection(height: self.calLogoTexture.height)
+                }
             })
             
             
@@ -287,8 +328,8 @@ class Renderer {
     }
     
     func readTileOut() async {
-        if (tileOutTexture != nil) {
-            let tex = tileOutTexture!
+        if (filteredYTexture != nil) {
+            let tex = filteredYTexture!
             
             let bytesPerPixel = 1
             
@@ -320,6 +361,93 @@ class Renderer {
             if (m >= 1) {
                 print("JAEMS")
             }
+        }
+    }
+    
+    func logoPointDetection(height: Int) {
+        if (topBottomTexture != nil) {
+            let tex = topBottomTexture!
+            let bytesPerPixel = 2
+            
+            let bytesPerRow = tex.width * bytesPerPixel
+            
+            var data = [UInt16](repeating: 0, count: tex.width*tex.height)
+            
+            tex.getBytes(&data,
+                bytesPerRow: bytesPerRow,
+                from: MTLRegionMake2D(0, 0, tex.width, tex.height),
+                mipmapLevel: 0)
+            
+            
+//            var data2 = [UInt8](repeating: 0, count: calLogoTexture!.width*calLogoTexture!.height)
+//            self.calLogoTexture!.getBytes(&data2, bytesPerRow: bytesPerRow / 2, from: MTLRegionMake2D(0, 0, calLogoTexture!.width, calLogoTexture!.height), mipmapLevel: 0)
+//
+//            let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
+//            let bitsPerComponent = 8
+//            let colorSpace = CGColorSpaceCreateDeviceGray()
+//            let context = CGContext(data: &data2, width: calLogoTexture!.width, height: calLogoTexture!.height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow / 2, space: colorSpace, bitmapInfo: bitmapInfo.rawValue)
+//
+//            guard let dstImage = context?.makeImage() else { print("FAILED TO MAKE IMG")
+//                return
+//            }
+//
+//
+//            let asUI = UIImage(cgImage: dstImage, scale: 0.0, orientation: .up)
+            
+            var run_length = 0
+            var zeroes = data[0] < 1
+            var runs: [[Int]] = []
+            var prevEnd = 0
+            
+            let t = tex.width
+            for x in 0...(tex.width - 1) {
+                let curr_min = Int(Double(data[x]) / Double(UInt16.max) * Double(height))
+                let curr_max = Int(Double(data[x + tex.width]) / Double(UInt16.max) * Double(height))
+                let zero = max(curr_max, curr_min) == 0
+                if (zero != zeroes && run_length > 4) {
+                    zeroes = !zeroes
+                    runs.append([prevEnd, run_length + prevEnd])
+                    prevEnd = prevEnd + run_length + 1
+                    run_length = 0
+                } else {
+                    run_length += 1
+                }
+                
+            }
+            
+            runs.append([prevEnd, run_length + prevEnd])
+            
+            let firstBoxYMins = Array(data[runs[1][0]-1..<runs[1][1]])
+            let firstBoxXs = Array(runs[1][0]-1..<runs[1][1])
+            var firstBoxMins = zip(firstBoxXs, firstBoxYMins).sorted(by: {UInt16($0.0) > UInt16($1.0)})
+            var firstBoxMinMedian = firstBoxMins[firstBoxMins.count / 2]
+            firstBoxMins.removeAll(where: {abs(Int($1) - Int(firstBoxMinMedian.1)) > 100})
+            firstBoxMinMedian = firstBoxMins[0]
+            firstBoxMinMedian.1 = UInt16(Int(Double(firstBoxMinMedian.1) / Double(UInt16.max) * Double(height)))
+            
+            
+            let firstBoxYMaxes = Array(data[tex.width + runs[1][0]-1..<tex.width + runs[1][1]])
+            var firstBoxMaxes = zip(firstBoxXs, firstBoxYMaxes).sorted(by: {UInt16($0.0) > UInt16($1.0)})
+            var firstBoxMaxMedian = firstBoxMaxes[firstBoxMaxes.count / 2]
+            firstBoxMaxes.removeAll(where: {abs(Int($1) - Int(firstBoxMaxMedian.1)) > 100})
+            firstBoxMaxMedian = firstBoxMaxes[0]
+            firstBoxMaxMedian.1 = UInt16(Int(Double(firstBoxMaxMedian.1) / Double(UInt16.max) * Double(height)))
+            
+            let secondBoxYMins = Array(data[runs[5][0]-1..<runs[5][1]])
+            let secondBoxXs = Array(runs[5][0]-1..<runs[5][1])
+            var secondBoxMins = zip(secondBoxXs, secondBoxYMins).sorted(by: {UInt16($0.0) < UInt16($1.0)})
+            var secondBoxMinMedian = secondBoxMins[secondBoxMins.count / 2]
+            secondBoxMins.removeAll(where: {abs(Int($1) - Int(secondBoxMinMedian.1)) > 100})
+            secondBoxMinMedian = secondBoxMins[0]
+            secondBoxMinMedian.1 = UInt16(Int(Double(secondBoxMinMedian.1) / Double(UInt16.max) * Double(height)))
+            
+            let secondBoxYMaxes = Array(data[tex.width + runs[5][0]-1..<tex.width + runs[5][1]])
+            var secondBoxMaxes = zip(secondBoxXs, secondBoxYMaxes).sorted(by: {UInt16($0.0) < UInt16($1.0)})
+            var secondBoxMaxMedian = secondBoxMaxes[secondBoxMaxes.count / 2]
+            secondBoxMaxes.removeAll(where: {abs(Int($1) - Int(secondBoxMaxMedian.1)) > 100})
+            secondBoxMaxMedian = secondBoxMaxes[0]
+            secondBoxMaxMedian.1 = UInt16(Int(Double(secondBoxMaxMedian.1) / Double(UInt16.max) * Double(height)))
+            
         }
     }
     
@@ -361,7 +489,7 @@ class Renderer {
             print("TRANSFORMING")
             let hough = houghSpace(image: asUI, data: data)
             print("FINDING PEAKS")
-            newLines = peakLines(houghSpace: hough, n: 4)
+            newLines = peakLines(houghSpace: hough, n: 10)
             let imageWithLines = draw(lines: newLines, inImage: asUI, color: .red)
             lineUpdate += 1
             frameProcessed = true
@@ -508,6 +636,13 @@ class Renderer {
         } catch let error {
             print("Failed to create second compute pipeline state, error \(error)")
         }
+        
+        let f3 : MTLFunction = defaultLibrary.makeFunction(name: "logoDetect")!
+        do {
+            self.logoComputePipelineState = try device.makeComputePipelineState(function: f3)
+        } catch let error {
+            print("Failed to create second compute pipeline state, error \(error)")
+        }
 //        do {
 //        try tilePipelineState = device.makeRenderPipelineState(tileDescriptor: tileDescriptor, options: tileOption, reflection: nil)
 //        } catch let error {
@@ -549,6 +684,8 @@ class Renderer {
         }
         cameraImageTextureY = createTexture(fromPixelBuffer: frame.capturedImage, pixelFormat: .r8Unorm, planeIndex: 0)
         cameraImageTextureCbCr = createTexture(fromPixelBuffer: frame.capturedImage, pixelFormat: .rg8Unorm, planeIndex: 1)
+        
+//        print(frame.camera.eulerAngles)
         
     }
 
@@ -640,9 +777,9 @@ class Renderer {
         renderEncoder.setVertexBuffer(imagePlaneVertexBuffer, offset: 0, index: 1)
 
         // Setup textures for the fog fragment shader.
-        renderEncoder.setFragmentTexture(cleanOutTexture, index: 0)
+//        renderEncoder.setFragmentTexture(cleanOutTexture, index: 0)
 //        renderEncoder.setFragmentTexture(tileOutTexture, index: 0)
-//        renderEncoder.setFragmentTexture(calLogoTexture, index: 0)
+        renderEncoder.setFragmentTexture(calLogoTexture, index: 0)
 //        renderEncoder.setFragmentTexture(filteredYTexture, index: 0)
 //        renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
@@ -703,6 +840,13 @@ class Renderer {
         calLogoDescriptor.usage = [.shaderRead, .shaderWrite]
         calLogoTexture = device.makeTexture(descriptor: calLogoDescriptor)
         
+        let topBottomDescriptor = MTLTextureDescriptor()
+        topBottomDescriptor.pixelFormat = .r16Unorm
+        topBottomDescriptor.width = width
+        topBottomDescriptor.height = 2
+        topBottomDescriptor.usage = [.shaderRead, .shaderWrite]
+        topBottomTexture = device.makeTexture(descriptor: topBottomDescriptor)
+        
 //        blurFilter = MPSImageGaussianBlur(device: device, sigma: 8)
         let luminanceWeights: [Float] = [ 0.333, 0.334, 0.333 ]
         sobelFilter = MPSImageSobel(device: device)
@@ -738,7 +882,7 @@ class Renderer {
     
     // Schedules the depth texture to be blurred on the GPU using the `blurFilter`.
     func applySobel(commandBuffer: MTLCommandBuffer) {
-        guard let yTexture = cleanOutTexture else {
+        guard let yTexture = tileOutTexture else {
             print("Error: Unable to apply the MPS filter.")
             return
         }

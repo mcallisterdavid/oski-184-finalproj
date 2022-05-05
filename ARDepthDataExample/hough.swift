@@ -97,7 +97,6 @@ func draw(lines: [Line], inImage image: UIImage, color: UIColor) -> UIImage {
     
     image.draw(in: CGRect(origin: CGPoint(x: 0, y: 0), size: image.size))
     color.set()
-//    context.setStrokeColor(color.cgColor)
     
     context.setLineWidth(1)
     
@@ -127,9 +126,6 @@ func draw(lines: [Line], inImage image: UIImage, color: UIColor) -> UIImage {
         
         context.move(to: startCoords)
         context.addLine(to: endCoords)
-        
-        print("START COORDS: \(startCoords)")
-        print("END COORDS: \(endCoords)")
         
         context.strokePath()
     }
