@@ -49,11 +49,21 @@ float greenness_model(float4 rgb) {
     float b2 = rgb.b * rgb.b;
     float dotted = -41.25229454 * rgb.r + 48.47907676 * rgb.g + 35.03935425 * rgb.b - 49.15164922 * r2 + 98.77229899 * g2 - 81.02268637 * b2 - 17.147;
     float greenness = 1.0 / (1.0 + exp(0.0 - dotted));
-//    if (greenness > 0.275) {
-//        greenness = 1;
-//    } else {
-//        greenness = 0;
-//    }
+    return greenness > 0.275 ? 1.0 : 0.0;
+}
+
+// 18.95133651,  -4.85966621, -10.39011094,  27.88796087,
+//-7.50762479, -13.17996304
+
+// 21.91285818,  -4.52193914,  -6.03139786,  31.65340327,
+//-8.98572585, -17.39335782
+
+float calness_model(float4 rgb) {
+    float r2 = rgb.r * rgb.r;
+    float g2 = rgb.g * rgb.g;
+    float b2 = rgb.b * rgb.b;
+    float dotted = 21.91285818 * rgb.r - 4.52193914 * rgb.g - 6.03139786 * rgb.b + 31.65340327 * r2 - 8.98572585 * g2 - 17.39335782 * b2 - 26.44;
+    float greenness = 1.0 / (1.0 + exp(0.0 - dotted));
     return greenness > 0.275 ? 1.0 : 0.0;
 }
 
@@ -91,11 +101,11 @@ kernel void imageClean(texture2d<float, access::read> greenWhiteDiff [[texture(0
     // random number generator
     Loki rng = Loki(gid.x, gid.y, imageIn[0]);
     // radius for random sampling
-    int r = 5;
+    int r = 10;
     // number of random samples
     int n = 20;
 
-    if (imageIn[0] > threshold) {
+    if (imageIn.r > threshold) {
         int count = 0; // how many samples are white
         for (int i = 0; i < n; i++) {
             float rng_angle = rng.rand() * 2.0;
@@ -106,7 +116,7 @@ kernel void imageClean(texture2d<float, access::read> greenWhiteDiff [[texture(0
             if (sample[0] > threshold)
                 count += 1;
         }
-        if (count > n / 2) {
+        if (count > n / 4) {
             output.write(1.0, gid);
         } else {
             output.write(0.0, gid);
@@ -121,6 +131,7 @@ kernel void imageClean(texture2d<float, access::read> greenWhiteDiff [[texture(0
 kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[texture(0)]],
                            texture2d<float, access::read> cameraImageTextureCbCr [[texture(1)]],
                            texture2d<float, access::write> output [[texture(2)]],
+                           texture2d<float, access::write> calLogoOutput [[texture(3)]],
                            uint2 gid [[thread_position_in_grid]]) {
     float4 yIn = cameraImageTextureY.read(gid);
     // yIn.r -> luma
@@ -134,19 +145,114 @@ kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[
 //    }
     
     float sobel_x = 0.0;
+    int num_white = 0;
+    int num_green = 0;
+    
     
     for (int i = -1; i < 2; i++) {
         for (int j = -1; j < 2; j++) {
             float4 curr_y = cameraImageTextureY.read(uint2(gid.x + i, gid.y + j));
             float4 curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + i) / 2, (gid.y + j) / 2));
             float4 curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
-            float curr = greenness_model(curr_rgb);
-            curr -= whiteness_model(curr_rgb);
-            sobel_x += curr;
+//            float curr = greenness_model(curr_rgb);
+//            curr -= whiteness_model(curr_rgb);
+//            sobel_x += curr;
+            num_white += whiteness_model(curr_rgb);
+            num_green += greenness_model(curr_rgb);
         }
     }
     
-    output.write(float4(sobel_x / 9.0, 0, 0, 1), gid);
+    
+    // Upside-down T kernel
+    
+//    float total = 0.0;
+//    
+//    int i = -1;
+//    int j = -1;
+//    float4 curr_y = cameraImageTextureY.read(uint2(gid.x + i, gid.y + j));
+//    float4 curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + i) / 2, (gid.y + j) / 2));
+//    float4 curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    total += greenness_model(curr_rgb);
+//    total -= whiteness_model(curr_rgb);
+//    
+//    i = 0;
+//    j = -1;
+//    curr_y = cameraImageTextureY.read(uint2(gid.x + i, gid.y + j));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + i) / 2, (gid.y + j) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    total += whiteness_model(curr_rgb);
+//    total -= greenness_model(curr_rgb);
+//    
+//    i = 1;
+//    j = -1;
+//    curr_y = cameraImageTextureY.read(uint2(gid.x + i, gid.y + j));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + i) / 2, (gid.y + j) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    total += greenness_model(curr_rgb);
+//    total -= whiteness_model(curr_rgb);
+//    
+//    i = -1;
+//    j = 0;
+//    curr_y = cameraImageTextureY.read(uint2(gid.x + i, gid.y + j));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + i) / 2, (gid.y + j) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    total += greenness_model(curr_rgb);
+//    total -= whiteness_model(curr_rgb);
+//    
+//    i = 0;
+//    j = 0;
+//    curr_y = cameraImageTextureY.read(uint2(gid.x + i, gid.y + j));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + i) / 2, (gid.y + j) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    total += whiteness_model(curr_rgb);
+//    total -= greenness_model(curr_rgb);
+//    
+//    i = 1;
+//    j = 0;
+//    curr_y = cameraImageTextureY.read(uint2(gid.x + i, gid.y + j));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + i) / 2, (gid.y + j) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    total += greenness_model(curr_rgb);
+//    total -= whiteness_model(curr_rgb);
+//    
+//    i = -1;
+//    j = 1;
+//    curr_y = cameraImageTextureY.read(uint2(gid.x + i, gid.y + j));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + i) / 2, (gid.y + j) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    total += whiteness_model(curr_rgb);
+//    total -= greenness_model(curr_rgb);
+//    
+//    i = 0;
+//    j = 1;
+//    curr_y = cameraImageTextureY.read(uint2(gid.x + i, gid.y + j));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + i) / 2, (gid.y + j) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    total += whiteness_model(curr_rgb);
+//    total -= greenness_model(curr_rgb);
+//    
+//    i = 1;
+//    j = 1;
+//    curr_y = cameraImageTextureY.read(uint2(gid.x + i, gid.y + j));
+//    curr_cbcr = cameraImageTextureCbCr.read(uint2((gid.x + i) / 2, (gid.y + j) / 2));
+//    curr_rgb = ycbcrToRGBTransform(curr_y, curr_cbcr);
+//    total += whiteness_model(curr_rgb);
+//    total -= greenness_model(curr_rgb);
+    
+    
+    
+    
+    
+    float4 rgb = ycbcrToRGBTransform(yIn, cbcrIn);
+    
+    
+    float out_color = num_white > 1 && num_green > 1 ? 1.0 : 0.0;
+    float cal_color = calness_model(rgb);
+    
+//    output.write(float4(sobel_x / 9.0, 0, 0, 1), gid);
+    output.write(float4(out_color, 0, 0, 1), gid);
+    calLogoOutput.write(float4(cal_color, 0, 0, 1), gid);
+//    calLogoOutput.write(float4(total / 9.0, 0, 0, 1), gid);
 }
 
 // Fog the image vertex function.
@@ -199,7 +305,7 @@ texture2d<float, access::write> lineDraw [[ texture(4) ]])
         cameraImageTextureCbCr.sample(s, in.texCoordCamera)
     );
     float edge = cameraImageTextureY.sample(s, in.texCoordCamera).r;
-    
+//
     rgb = float4(edge, edge, edge, 1);
     half4 cameraColor = half4(rgb);
 

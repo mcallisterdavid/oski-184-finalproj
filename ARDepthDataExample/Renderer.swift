@@ -80,6 +80,8 @@ class Renderer {
     
     var cleanOutTexture: MTLTexture!
     
+    var calLogoTexture: MTLTexture!
+    
     var lineTexture: MTLTexture!
     
     // A filter used to blur the depth data for rendering fog.
@@ -183,7 +185,6 @@ class Renderer {
                 commandBuffer.present(currentDrawable)
                 
                 
-                
             }
             
             
@@ -220,6 +221,8 @@ class Renderer {
                                                  depth: 1)
                     
                     computeEncoder.setTexture(tileOutTexture, index: 2)
+                    
+                    computeEncoder.setTexture(calLogoTexture, index: 3)
                     
                     computeEncoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
                     
@@ -271,7 +274,7 @@ class Renderer {
                 if (self.cleanOutTexture != nil && frameProcessed) {
                     frameProcessed = false
                     Task.init{await self.readTileOut()}
-    //                Task.init{await findLines()}
+//                    Task.init{await self.findLines()}
 
                 }
             })
@@ -284,8 +287,8 @@ class Renderer {
     }
     
     func readTileOut() async {
-        if (cleanOutTexture != nil) {
-            let tex = cleanOutTexture!
+        if (tileOutTexture != nil) {
+            let tex = tileOutTexture!
             
             let bytesPerPixel = 1
             
@@ -358,7 +361,7 @@ class Renderer {
             print("TRANSFORMING")
             let hough = houghSpace(image: asUI, data: data)
             print("FINDING PEAKS")
-            newLines = peakLines(houghSpace: hough, n: 1)
+            newLines = peakLines(houghSpace: hough, n: 4)
             let imageWithLines = draw(lines: newLines, inImage: asUI, color: .red)
             lineUpdate += 1
             frameProcessed = true
@@ -638,6 +641,8 @@ class Renderer {
 
         // Setup textures for the fog fragment shader.
         renderEncoder.setFragmentTexture(cleanOutTexture, index: 0)
+//        renderEncoder.setFragmentTexture(tileOutTexture, index: 0)
+//        renderEncoder.setFragmentTexture(calLogoTexture, index: 0)
 //        renderEncoder.setFragmentTexture(filteredYTexture, index: 0)
 //        renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
@@ -691,6 +696,13 @@ class Renderer {
         cleanOutDescriptor.usage = [.shaderRead, .shaderWrite]
         cleanOutTexture = device.makeTexture(descriptor: cleanOutDescriptor)
         
+        let calLogoDescriptor = MTLTextureDescriptor()
+        calLogoDescriptor.pixelFormat = .r8Unorm
+        calLogoDescriptor.width = width
+        calLogoDescriptor.height = height
+        calLogoDescriptor.usage = [.shaderRead, .shaderWrite]
+        calLogoTexture = device.makeTexture(descriptor: calLogoDescriptor)
+        
 //        blurFilter = MPSImageGaussianBlur(device: device, sigma: 8)
         let luminanceWeights: [Float] = [ 0.333, 0.334, 0.333 ]
         sobelFilter = MPSImageSobel(device: device)
@@ -726,7 +738,7 @@ class Renderer {
     
     // Schedules the depth texture to be blurred on the GPU using the `blurFilter`.
     func applySobel(commandBuffer: MTLCommandBuffer) {
-        guard let yTexture = tileOutTexture else {
+        guard let yTexture = cleanOutTexture else {
             print("Error: Unable to apply the MPS filter.")
             return
         }
