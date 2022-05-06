@@ -60,25 +60,6 @@ class ViewController: UIViewController, MTKViewDelegate, ARSessionDelegate {
 
         // Run the view's session.
         session.run(configuration)
-        
-        for i in 1...renderer.numLines {
-            let path = UIBezierPath()
-            path.move(to: CGPoint(x: 10, y: 10))
-            path.addLine(to: CGPoint(x: 10, y: 10))
-
-            // Create a `CAShapeLayer` that uses that `UIBezierPath`:
-
-            let shapeLayer = CAShapeLayer()
-            shapeLayer.path = path.cgPath
-            shapeLayer.strokeColor = UIColor.blue.cgColor
-            shapeLayer.fillColor = UIColor.clear.cgColor
-            shapeLayer.lineWidth = 2
-
-            // Add that `CAShapeLayer` to your view's layer:
-
-            self.view.layer.addSublayer(shapeLayer)
-            self.lineViews.append(shapeLayer)
-        }
 
         
         // The screen shouldn't dim during AR experiences.

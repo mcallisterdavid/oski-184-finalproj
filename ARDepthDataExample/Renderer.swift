@@ -18,6 +18,11 @@ protocol RenderDestinationProvider {
     var sampleCount: Int { get set }
 }
 
+struct Vertex {
+    var position: SIMD3<Float>
+    var color: SIMD4<Float>
+}
+
 // The max number of command buffers in flight.
 let kMaxBuffersInFlight: Int = 3
 
@@ -49,11 +54,15 @@ class Renderer {
     var lines: [Array<Int>] = []
     var newLines: [Line] = []
     
+    var baryVertices: [Vertex] = []
+    
     // An object that holds vertex information for source and destination rendering.
     var imagePlaneVertexBuffer: MTLBuffer!
     
     // An object that defines the Metal shaders that render the camera image and fog.
     var fogPipelineState: MTLRenderPipelineState!
+    
+    var baryPipelineState: MTLRenderPipelineState!
     
 //    var tilePipelineState: MTLRenderPipelineState!
     
@@ -120,6 +129,13 @@ class Renderer {
         viewportSizeDidChange = true
     }
     
+    func doBaryRenderPass() {
+        let vertices: [Float] = [0, 1, 0, -1, -1, 0, 1, -1, 0]
+        let vertexBuffer = device.makeBuffer(bytes: vertices, length: vertices.count * MemoryLayout<Float>.size, options: [])
+        
+        
+    }
+    
     func update() {
         // Wait to ensure only kMaxBuffersInFlight are getting proccessed by any stage in the Metal
         // pipeline (App, Metal, Drivers, GPU, etc).
@@ -151,21 +167,6 @@ class Renderer {
             
             
             if let renderPassDescriptor = renderDestination.currentRenderPassDescriptor, let currentDrawable = renderDestination.currentDrawable {
-//                let computeEncoder = commandBuffer.makeComputeCommandEncoder()
-//                if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
-//                    computeEncoder.label = "MyComputeEncoder"
-//
-//                    guard let cameraImageY = cameraImageTextureY, let cameraImageCbCr = cameraImageTextureCbCr
-//                        else {
-//                        return
-//                    }
-//
-//                    computeEncoder.setTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
-//                    computeEncoder.setTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
-//                    computeEncoder.setTexture(filteredYTexture, index: 2)
-//
-//               let threadGroupSize = MTLSizeMake(16, 16, 1)
-//                    let threadGroupCount = MTLSizeMake(filteredYTexture.width)
                 
                 
                 // Check these values
@@ -181,6 +182,7 @@ class Renderer {
 
                     // Schedule the camera image and fog to be drawn to the screen.
                     doFogRenderPass(renderEncoder: fogRenderEncoding)
+                    doBaryPass(renderEncoder: fogRenderEncoding)
 
                     // Finish encoding commands.
                     fogRenderEncoding.endEncoding()
@@ -311,13 +313,14 @@ class Renderer {
             commandBuffer.addCompletedHandler({_ in
                 if (self.cleanOutTexture != nil && frameProcessed) {
                     frameProcessed = false
-                    Task.init{await self.readTileOut()}
+//                    Task.init{await self.readTileOut()}
 //                    Task.init{await self.findLines()}
 
                 }
                 if (self.calLogoTexture != nil) {
-                    self.logoPointDetection(height: self.calLogoTexture.height)
+                    self.logoPointDetection(width: self.calLogoTexture.width, height: self.calLogoTexture.height)
                 }
+                numFrames += 1
             })
             
             
@@ -327,9 +330,11 @@ class Renderer {
         }
     }
     
+    
+    
     func readTileOut() async {
-        if (filteredYTexture != nil) {
-            let tex = filteredYTexture!
+        if (tileOutTexture != nil) {
+            let tex = tileOutTexture!
             
             let bytesPerPixel = 1
             
@@ -364,11 +369,12 @@ class Renderer {
         }
     }
     
-    func logoPointDetection(height: Int) {
+    func logoPointDetection(width: Int, height: Int) {
+        
         if (topBottomTexture != nil) {
             let tex = topBottomTexture!
             let bytesPerPixel = 2
-            
+
             let bytesPerRow = tex.width * bytesPerPixel
             
             var data = [UInt16](repeating: 0, count: tex.width*tex.height)
@@ -378,22 +384,7 @@ class Renderer {
                 from: MTLRegionMake2D(0, 0, tex.width, tex.height),
                 mipmapLevel: 0)
             
-            
-//            var data2 = [UInt8](repeating: 0, count: calLogoTexture!.width*calLogoTexture!.height)
-//            self.calLogoTexture!.getBytes(&data2, bytesPerRow: bytesPerRow / 2, from: MTLRegionMake2D(0, 0, calLogoTexture!.width, calLogoTexture!.height), mipmapLevel: 0)
 //
-//            let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
-//            let bitsPerComponent = 8
-//            let colorSpace = CGColorSpaceCreateDeviceGray()
-//            let context = CGContext(data: &data2, width: calLogoTexture!.width, height: calLogoTexture!.height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow / 2, space: colorSpace, bitmapInfo: bitmapInfo.rawValue)
-//
-//            guard let dstImage = context?.makeImage() else { print("FAILED TO MAKE IMG")
-//                return
-//            }
-//
-//
-//            let asUI = UIImage(cgImage: dstImage, scale: 0.0, orientation: .up)
-            
             var run_length = 0
             var zeroes = data[0] < 1
             var runs: [[Int]] = []
@@ -412,27 +403,55 @@ class Renderer {
                 } else {
                     run_length += 1
                 }
-                
+
             }
             
             runs.append([prevEnd, run_length + prevEnd])
+            
+            self.baryVertices = []
             
             let firstBoxYMins = Array(data[runs[1][0]-1..<runs[1][1]])
             let firstBoxXs = Array(runs[1][0]-1..<runs[1][1])
             var firstBoxMins = zip(firstBoxXs, firstBoxYMins).sorted(by: {UInt16($0.0) > UInt16($1.0)})
             var firstBoxMinMedian = firstBoxMins[firstBoxMins.count / 2]
             firstBoxMins.removeAll(where: {abs(Int($1) - Int(firstBoxMinMedian.1)) > 100})
-            firstBoxMinMedian = firstBoxMins[0]
+            var firstBoxXAvg = 0
+            var firstBoxYAvg: UInt16 = 0
+            for boxMin in firstBoxMins {
+                firstBoxXAvg += boxMin.0 / firstBoxMins.count
+                firstBoxYAvg += boxMin.1 / UInt16(firstBoxMins.count)
+            }
+            
+//            firstBoxMinMedian = firstBoxMins[0]
+//            firstBoxMinMedian.1 = UInt16(Int(Double(firstBoxMinMedian.1) / Double(UInt16.max) * Double(height)))
+            firstBoxMinMedian.0 = firstBoxXAvg
             firstBoxMinMedian.1 = UInt16(Int(Double(firstBoxMinMedian.1) / Double(UInt16.max) * Double(height)))
+            let firstMinX = 2.0 * (Float(firstBoxMinMedian.0) / Float(width)) - 1.0
+            let firstMinY = 0.0 - (2.0 * (Float(firstBoxMinMedian.1) / Float(height)) - 1.0)
             
+            self.baryVertices.append(Vertex(position: SIMD3(firstMinX, firstMinY, 0), color: SIMD4(0.91, 0.812, 0.33, 1)))
             
+            // 232, 207, 84
+            
+
+
             let firstBoxYMaxes = Array(data[tex.width + runs[1][0]-1..<tex.width + runs[1][1]])
             var firstBoxMaxes = zip(firstBoxXs, firstBoxYMaxes).sorted(by: {UInt16($0.0) > UInt16($1.0)})
             var firstBoxMaxMedian = firstBoxMaxes[firstBoxMaxes.count / 2]
             firstBoxMaxes.removeAll(where: {abs(Int($1) - Int(firstBoxMaxMedian.1)) > 100})
             firstBoxMaxMedian = firstBoxMaxes[0]
             firstBoxMaxMedian.1 = UInt16(Int(Double(firstBoxMaxMedian.1) / Double(UInt16.max) * Double(height)))
+//            self.baryVertices.append([firstBoxMaxMedian.0, Int(firstBoxMaxMedian.1)])
+//            self.baryVertices.append(2.0 * (Float(firstBoxMaxMedian.0) / Float(width)) - 1.0)
+//            self.baryVertices.append(2.0 * (Float(firstBoxMaxMedian.1) / Float(height)) - 1.0)
+            let firstMaxX = 2.0 * (Float(firstBoxMaxMedian.0) / Float(width)) - 1.0
+            let firstMaxY = 0.0 - (2.0 * (Float(firstBoxMaxMedian.1) / Float(height)) - 1.0)
             
+            
+            // 248, 117, 250
+            
+            self.baryVertices.append(Vertex(position: SIMD3(firstMaxX, firstMaxY, 0), color: SIMD4(0.97, 0.46, 0.98, 1)))
+
             let secondBoxYMins = Array(data[runs[5][0]-1..<runs[5][1]])
             let secondBoxXs = Array(runs[5][0]-1..<runs[5][1])
             var secondBoxMins = zip(secondBoxXs, secondBoxYMins).sorted(by: {UInt16($0.0) < UInt16($1.0)})
@@ -441,12 +460,72 @@ class Renderer {
             secondBoxMinMedian = secondBoxMins[0]
             secondBoxMinMedian.1 = UInt16(Int(Double(secondBoxMinMedian.1) / Double(UInt16.max) * Double(height)))
             
+            let secondMinX = 2.0 * (Float(secondBoxMinMedian.0) / Float(width)) - 1.0
+            let secondMinY = 0.0 - (2.0 * (Float(secondBoxMinMedian.1) / Float(height)) - 1.0)
+            self.baryVertices.append(Vertex(position: SIMD3(secondMinX, secondMinY, 0), color: SIMD4(0.61, 0.97, 0.51, 1)))
+            
+            // 255, 117, 138
+
             let secondBoxYMaxes = Array(data[tex.width + runs[5][0]-1..<tex.width + runs[5][1]])
             var secondBoxMaxes = zip(secondBoxXs, secondBoxYMaxes).sorted(by: {UInt16($0.0) < UInt16($1.0)})
             var secondBoxMaxMedian = secondBoxMaxes[secondBoxMaxes.count / 2]
             secondBoxMaxes.removeAll(where: {abs(Int($1) - Int(secondBoxMaxMedian.1)) > 100})
             secondBoxMaxMedian = secondBoxMaxes[0]
             secondBoxMaxMedian.1 = UInt16(Int(Double(secondBoxMaxMedian.1) / Double(UInt16.max) * Double(height)))
+            
+            let secondMaxX = 2.0 * (Float(secondBoxMaxMedian.0) / Float(width)) - 1.0
+            let secondMaxY = 0.0 - (2.0 * (Float(secondBoxMaxMedian.1) / Float(height)) - 1.0)
+            
+            // 117, 250, 248
+            self.baryVertices.append(Vertex(position: SIMD3(secondMaxX, secondMaxY, 0), color: SIMD4(0.46, 0.98, 0.972, 1)))
+            
+            
+            
+            if (numFrames % 30 == 32) {
+                var data2 = [UInt8](repeating: 0, count: calLogoTexture!.width*calLogoTexture!.height)
+                self.calLogoTexture!.getBytes(&data2, bytesPerRow: bytesPerRow / 2, from: MTLRegionMake2D(0, 0, calLogoTexture!.width, calLogoTexture!.height), mipmapLevel: 0)
+
+                let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
+                let bitsPerComponent = 8
+                let colorSpace = CGColorSpaceCreateDeviceGray()
+                let context = CGContext(data: &data2, width: calLogoTexture!.width, height: calLogoTexture!.height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow / 2, space: colorSpace, bitmapInfo: bitmapInfo.rawValue)
+
+                guard let dstImage = context?.makeImage() else { print("FAILED TO MAKE IMG")
+                    return
+                }
+
+
+                let asUI = UIImage(cgImage: dstImage, scale: 0.0, orientation: .up)
+                
+                
+                UIGraphicsBeginImageContextWithOptions(asUI.size, true, 0)
+                let cgContext = UIGraphicsGetCurrentContext()!
+
+                asUI.draw(in: CGRect(origin: CGPoint(x: 0, y: 0), size: asUI.size))
+                UIColor.red.set()
+
+
+                var ellipseRect = CGRect(x: firstBoxMinMedian.0 - 7, y: Int(firstBoxMinMedian.1) - 7, width: 14, height: 14)
+                cgContext.fillEllipse(in: ellipseRect)
+
+                ellipseRect = CGRect(x: firstBoxMaxMedian.0 - 7, y: Int(firstBoxMaxMedian.1) - 7, width: 14, height: 14)
+                cgContext.fillEllipse(in: ellipseRect)
+
+                ellipseRect = CGRect(x: secondBoxMinMedian.0 - 7, y: Int(secondBoxMinMedian.1) - 7, width: 14, height: 14)
+                cgContext.fillEllipse(in: ellipseRect)
+
+                ellipseRect = CGRect(x: secondBoxMaxMedian.0 - 7, y: Int(secondBoxMaxMedian.1) - 7, width: 14, height: 14)
+                cgContext.fillEllipse(in: ellipseRect)
+
+
+                guard let withPoints = UIGraphicsGetImageFromCurrentImageContext() else {
+                    return
+                }
+                
+                var tf = 2
+                tf += 4
+            }
+            
             
         }
     }
@@ -499,56 +578,35 @@ class Renderer {
             return
             
             
-            
-            // BINNING CODE FOR EFFICIENCY BELOW (doesn't work)
-            
-            
-//            let thetaBins = Int(floor(180.0 / Double(thetaRes))) + 1
-//
-//            let rhoBins = 2 * Int(ceil(sqrt(pow(Double(tex.width), 2.0) + pow(Double(tex.height), 2.0)) / Double(rhoRes)))
-//
-//
-//
-//            var acc = Array(repeating: Array(repeating: 0, count: thetaBins), count: rhoBins)
-//
-//            func deg2rad(_ number: Double) -> Double {
-//                return number * .pi / 180
-//            }
-//
-//            var cnt = 0
-//            for i in 0...(data.count - 1) {
-//                let pix = data[i]
-//                if pix > 160 {
-//                    cnt += Int(1)
-//                    let x = i % tex.width
-//                    let y = (i / tex.width)
-//
-//                    var tryTheta = 0.0
-//                    while tryTheta < 180.0 {
-//                        let tryThetaR = deg2rad(tryTheta)
-//
-//                        let tryRho = Double(x) * cos(tryThetaR) - Double(y) * sin(tryThetaR)
-//                        let rhoBin = tryRho / Double(rhoRes) // + Double(rhoBins) / 2.0
-//                        let thetaBin = tryTheta / Double(thetaRes)
-//
-//                        if (tryRho >= 1) {
-//                            acc[Int(rhoBin)][Int(thetaBin)] += 1
-//                        }
-//                        tryTheta += Double(thetaRes)
-//                    }
-//
-//                }
-//            }
-//
-//            func to_rho(_ rhoBin: Double) -> Double {
-//                return (rhoBin - Double(rhoBins) / 2.0) * Double(rhoRes)
-//            }
-//
-//            func to_theta(_ thetaBin: Double) -> Double {
-//                return thetaBin * Double(thetaRes)
-//            }
-            
-            
+        }
+    }
+    
+    private func buildBaryPipelineState(library: MTLLibrary) {
+        let vertexFunction = library.makeFunction(name: "baryTransform")
+        let fragmentFunction = library.makeFunction(name: "baryFragmentShader")
+        
+        let baryPipelineDescriptor = MTLRenderPipelineDescriptor()
+        baryPipelineDescriptor.vertexFunction = vertexFunction
+        baryPipelineDescriptor.fragmentFunction = fragmentFunction
+        baryPipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        
+        let vertexDescriptor = MTLVertexDescriptor()
+        vertexDescriptor.attributes[0].format = .float3
+        vertexDescriptor.attributes[0].offset = 0
+        vertexDescriptor.attributes[0].bufferIndex = 0
+        
+        vertexDescriptor.attributes[1].format = .float4
+        vertexDescriptor.attributes[1].offset = MemoryLayout<float3>.stride
+        vertexDescriptor.attributes[1].bufferIndex = 0
+        
+        vertexDescriptor.layouts[0].stride = MemoryLayout<Vertex>.stride
+        
+        baryPipelineDescriptor.vertexDescriptor = vertexDescriptor
+        
+        do {
+            baryPipelineState = try device.makeRenderPipelineState(descriptor: baryPipelineDescriptor)
+        } catch let error as NSError {
+            print("error: \(error.localizedDescription)")
         }
     }
     
@@ -568,6 +626,9 @@ class Renderer {
         
         // Load all the shader files with a metal file extension in the project.
         let defaultLibrary = device.makeDefaultLibrary()!
+        
+        buildBaryPipelineState(library: defaultLibrary)
+        
                 
         // Create a vertex descriptor for our image plane vertex buffer.
         let imagePlaneVertexDescriptor = MTLVertexDescriptor()
@@ -600,14 +661,6 @@ class Renderer {
         fogPipelineStateDescriptor.sampleCount = renderDestination.sampleCount
         fogPipelineStateDescriptor.vertexFunction = fogVertexFunction
         fogPipelineStateDescriptor.fragmentFunction = fogFragmentFunction
-        
-        
-        // tile stuff
-//        let tileDescriptor = MTLTileRenderPipelineDescriptor();
-//        tileDescriptor.tileFunction = defaultLibrary.makeFunction(name: "colorTransform")!
-//        tileDescriptor.label = "Tile func"
-//        tileDescriptor.colorAttachments[0].pixelFormat = renderDestination.colorPixelFormat
-//        tileDescriptor.threadgroupSizeMatchesTileSize = true
         
         
         
@@ -758,6 +811,25 @@ class Renderer {
         }
     }
     
+    func doBaryPass(renderEncoder: MTLRenderCommandEncoder) {
+        if (self.baryVertices.count > 0) {
+            let vertices: [Float] = [0, 1, 0,
+                                     -1, -1, 0,
+                                     1, -1, 0]
+            
+            let indices: [UInt16] = [0, 1, 2,
+                                    1, 2, 3]
+            
+            let vertexBuffer = device.makeBuffer(bytes: self.baryVertices, length: self.baryVertices.count * MemoryLayout<Vertex>.size, options: [])
+            
+            let indexBuffer = device.makeBuffer(bytes: indices, length: indices.count * MemoryLayout<UInt16>.size, options: [])
+            
+            renderEncoder.setRenderPipelineState(self.baryPipelineState)
+            renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: indices.count, indexType: .uint16, indexBuffer: indexBuffer!, indexBufferOffset: 0)
+        }
+    }
+    
     // Schedules the camera image and fog to be rendered on the GPU.
     func doFogRenderPass(renderEncoder: MTLRenderCommandEncoder) {
         guard let cameraImageY = cameraImageTextureY, let cameraImageCbCr = cameraImageTextureCbCr,
@@ -779,9 +851,9 @@ class Renderer {
         // Setup textures for the fog fragment shader.
 //        renderEncoder.setFragmentTexture(cleanOutTexture, index: 0)
 //        renderEncoder.setFragmentTexture(tileOutTexture, index: 0)
-        renderEncoder.setFragmentTexture(calLogoTexture, index: 0)
+//        renderEncoder.setFragmentTexture(calLogoTexture, index: 0)
 //        renderEncoder.setFragmentTexture(filteredYTexture, index: 0)
-//        renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
+        renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageY), index: 0)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
         renderEncoder.setFragmentTexture(filteredDepthTexture, index: 2)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(confidenceTexture), index: 3)

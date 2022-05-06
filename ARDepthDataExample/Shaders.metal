@@ -24,6 +24,11 @@ typedef struct {
     float2 texCoord;
 } ImageColorInOut;
 
+struct VertexIn {
+    float4 position [[ attribute(0) ]];
+    float4 color [[ attribute(1) ]];
+};
+
 
 
 // Convert from YCbCr to rgb.
@@ -198,193 +203,44 @@ kernel void logoDetect(texture2d<float, access::read> logoTex [[texture(0)]],
 }
 
 
+
 kernel void imageClean(texture2d<float, access::read> greenWhiteDiff [[texture(0)]],
                        texture2d<float, access::write> output [[texture(1)]],
                        uint2 gid [[thread_position_in_grid]]) {
     float4 imageIn = greenWhiteDiff.read(gid);
 
-    float total = 0.0;
-    
-    // ROW 1
-        
-    int i = -2;
-    int j = -2;
-    float curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? -1.0 : 0.0;
-    
-    i = -1;
-    j = -2;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? -1.0 : 0.0;
-    
-    i = 0;
-    j = -2;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? -1.0 : 0.0;
-    
-    i = 1;
-    j = -2;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    i = 2;
-    j = -2;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    // ROW 2
-    
-    i = -2;
-    j = -1;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? -1.0 : 0.0;
-    
-    i = -1;
-    j = -1;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? -1.0 : 0.0;
-    
-    i = 0;
-    j = -1;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? -1.0 : 0.0;
-    
-    i = 1;
-    j = -1;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    i = 2;
-    j = -1;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    // ROW 3
-    
-    i = -2;
-    j = 0;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? -1.0 : 0.0;
-    
-    i = -1;
-    j = 0;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? -1.0 : 0.0;
-    
-    i = 0;
-    j = 0;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? -1.0 : 0.0;
-    
-    i = 1;
-    j = 0;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    i = 2;
-    j = 0;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    // ROW 4
-    
-    i = -2;
-    j = 1;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr;
-    
-    i = -1;
-    j = 1;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    i = 0;
-    j = 1;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    i = 1;
-    j = 1;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    i = 2;
-    j = 1;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    // ROW 5
-    
-    i = -2;
-    j = 2;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    i = -1;
-    j = 2;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    i = 0;
-    j = 2;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    i = 1;
-    j = 2;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    i = 2;
-    j = 2;
-    curr = greenWhiteDiff.read(uint2(gid.x + i, gid.y + j)).r;
-    total += curr > 0.5 ? 1.0 : 0.0;
-    
-    
-    float out_color = total > 15 ? 1.0 : 0.0;
-    
-    output.write(float4(out_color, 0, 0, 0), gid);
+    // threshold for doing random sampling
+    float threshold = 0.5;
+
+    // random number generator
+    Loki rng = Loki(gid.x, gid.y, imageIn[0]);
+    // radius for random sampling
+    int r = 10;
+    // number of random samples
+    int n = 20;
+
+    if (imageIn.r > threshold) {
+        int count = 0; // how many samples are white
+        for (int i = 0; i < n; i++) {
+            float rng_angle = rng.rand() * 2.0;
+            float rng_radius = rng.rand() * r;
+            int sample_x = floor(gid.x + cospi(rng_angle) * rng_radius);
+            int sample_y = floor(gid.y + sinpi(rng_angle) * rng_radius);
+            float4 sample = greenWhiteDiff.read(uint2(sample_x, sample_y));
+            if (sample[0] > threshold)
+                count += 1;
+        }
+        if (count > n / 4) {
+            output.write(1.0, gid);
+        } else {
+            output.write(0.0, gid);
+        }
+
+    } else {
+        output.write(0.0, gid);
+    }
+//    output.write(imageIn[0], gid);
 }
-
-
-
-//kernel void imageClean(texture2d<float, access::read> greenWhiteDiff [[texture(0)]],
-//                       texture2d<float, access::write> output [[texture(1)]],
-//                       uint2 gid [[thread_position_in_grid]]) {
-//    float4 imageIn = greenWhiteDiff.read(gid);
-//
-//    // threshold for doing random sampling
-//    float threshold = 0.5;
-//
-//    // random number generator
-//    Loki rng = Loki(gid.x, gid.y, imageIn[0]);
-//    // radius for random sampling
-//    int r = 10;
-//    // number of random samples
-//    int n = 20;
-//
-//    if (imageIn.r > threshold) {
-//        int count = 0; // how many samples are white
-//        for (int i = 0; i < n; i++) {
-//            float rng_angle = rng.rand() * 2.0;
-//            float rng_radius = rng.rand() * r;
-//            int sample_x = floor(gid.x + cospi(rng_angle) * rng_radius);
-//            int sample_y = floor(gid.y + sinpi(rng_angle) * rng_radius);
-//            float4 sample = greenWhiteDiff.read(uint2(sample_x, sample_y));
-//            if (sample[0] > threshold)
-//                count += 1;
-//        }
-//        if (count > n / 4) {
-//            output.write(1.0, gid);
-//        } else {
-//            output.write(0.0, gid);
-//        }
-//
-//    } else {
-//        output.write(0.0, gid);
-//    }
-////    output.write(imageIn[0], gid);
-//}
 
 kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[texture(0)]],
                            texture2d<float, access::read> cameraImageTextureCbCr [[texture(1)]],
@@ -452,6 +308,24 @@ vertex FogColorInOut fogVertexTransform(const device FogVertex* cameraVertices [
     return out;
 }
 
+struct VertexOut {
+    float4 position [[ position ]];
+    float4 color;
+};
+
+vertex VertexOut baryTransform(const VertexIn vertexIn [[ stage_in ]]) {
+    VertexOut vertexOut;
+    vertexOut.position = vertexIn.position;
+    vertexOut.color = vertexIn.color;
+    
+    return vertexOut;
+}
+
+fragment half4 baryFragmentShader(VertexOut vertexIn [[ stage_in ]]) {
+//    return (half4(1, 0, 0, 1) + prev) / 2;
+    return half4(vertexIn.color);
+}
+
 // Fog fragment function.
 fragment half4 fogFragmentShader(FogColorInOut in [[ stage_in ]],
 texture2d<float, access::sample> cameraImageTextureY [[ texture(0) ]],
@@ -485,9 +359,9 @@ texture2d<float, access::write> lineDraw [[ texture(4) ]])
         cameraImageTextureY.sample(s, in.texCoordCamera),
         cameraImageTextureCbCr.sample(s, in.texCoordCamera)
     );
-    float edge = cameraImageTextureY.sample(s, in.texCoordCamera).r;
+//    float edge = cameraImageTextureY.sample(s, in.texCoordCamera).r;
 //
-    rgb = float4(edge, edge, edge, 1);
+//    rgb = float4(edge, edge, edge, 1);
     half4 cameraColor = half4(rgb);
 
     
