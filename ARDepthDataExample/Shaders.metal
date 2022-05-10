@@ -61,7 +61,7 @@ float greenness_model(float4 rgb) {
 
 // -15.2537878 ,  48.00634927,  16.87723466, -32.39931238,
 //27.09634644, -41.88108443
-float greenness_model_tbltop(float4 rgb) {
+float greenness_model_field(float4 rgb) {
     float r2 = rgb.r * rgb.r;
     float g2 = rgb.g * rgb.g;
     float b2 = rgb.b * rgb.b;
@@ -172,7 +172,7 @@ kernel void logoDetect(texture2d<float, access::read> logoTex [[texture(0)]],
         if (!foundFirst) {
             if (logoTex.read(uint2(gid.x, gid.y + i)).r > 0.5) {
                 
-                if (island(logoTex, gid.x, gid.y + i) > 20) {
+                if (island(logoTex, gid.x, gid.y + i) > 10) {
                     first = i;
                     foundFirst = true;
                 }
@@ -182,7 +182,7 @@ kernel void logoDetect(texture2d<float, access::read> logoTex [[texture(0)]],
             }
         } else {
             if (logoTex.read(uint2(gid.x, gid.y + i)).r > 0.5) {
-                if (island(logoTex, gid.x, gid.y + i) > 20) {
+                if (i - first < 200 && island(logoTex, gid.x, gid.y + i) > 10) {
                     last = i;
                 }
             }
@@ -272,7 +272,7 @@ kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[
 //            curr -= whiteness_model(curr_rgb);
 //            sobel_x += curr;
             num_white += whiteness_model(curr_rgb);
-            num_green += greenness_model(curr_rgb);
+            num_green += greenness_model_field(curr_rgb);
         }
     }
     
@@ -281,13 +281,14 @@ kernel void colorTransform(texture2d<float, access::read> cameraImageTextureY [[
     float4 rgb = ycbcrToRGBTransform(yIn, cbcrIn);
     
     
-    float out_color = num_white > 1 && num_green > 1 ? 1.0 : 0.0;
+    float out_color = num_white > 0 && num_green > 0 ? 1.0 : 0.0;
     float cal_color = calness_model(rgb);
     
     float greenness = whiteness_model_tbltop(rgb);
     
 //    output.write(float4(sobel_x / 9.0, 0, 0, 1), gid);
-    output.write(float4(greenness, 0, 0, 1), gid);
+    output.write(float4(out_color, 0, 0, 1), gid);
+//    output.write(float4(greenness, 0, 0, 1), gid);
     calLogoOutput.write(float4(cal_color, 0, 0, 1), gid);
 //    calLogoOutput.write(float4(total / 9.0, 0, 0, 1), gid);
 }

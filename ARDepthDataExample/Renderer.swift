@@ -129,12 +129,6 @@ class Renderer {
         viewportSizeDidChange = true
     }
     
-    func doBaryRenderPass() {
-        let vertices: [Float] = [0, 1, 0, -1, -1, 0, 1, -1, 0]
-        let vertexBuffer = device.makeBuffer(bytes: vertices, length: vertices.count * MemoryLayout<Float>.size, options: [])
-        
-        
-    }
     
     func update() {
         // Wait to ensure only kMaxBuffersInFlight are getting proccessed by any stage in the Metal
@@ -242,25 +236,25 @@ class Renderer {
             if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
                 computeEncoder.setComputePipelineState(cleanComputePipelineState)
 
-                if let greenWhiteIn = tileOutTexture {
+                if let greenWhiteIn = calLogoTexture {
 
 
-                    computeEncoder.setTexture(tileOutTexture, index: 0)
+                    computeEncoder.setTexture(calLogoTexture, index: 0)
 
                     let threadgroupSize = MTLSizeMake(16, 16, 1);
 
                     var threadgroupCount = MTLSize();
 
-                    threadgroupCount.width  = (tileOutTexture.width  + threadgroupSize.width -  1) / threadgroupSize.width;
-                    threadgroupCount.height = (tileOutTexture.height + threadgroupSize.height - 1) / threadgroupSize.height;
+                    threadgroupCount.width  = (calLogoTexture.width  + threadgroupSize.width -  1) / threadgroupSize.width;
+                    threadgroupCount.height = (calLogoTexture.height + threadgroupSize.height - 1) / threadgroupSize.height;
                     threadgroupCount.depth = 1
 
                     let w = cleanComputePipelineState.threadExecutionWidth
                     let h = cleanComputePipelineState.maxTotalThreadsPerThreadgroup / w
                     let threadsPerThreadgroup = MTLSizeMake(w, h, 1)
 
-                    let threadsPerGrid = MTLSize(width: tileOutTexture.width,
-                                                 height: tileOutTexture.height,
+                    let threadsPerGrid = MTLSize(width: calLogoTexture.width,
+                                                 height: calLogoTexture.height,
                                                  depth: 1)
 
                     computeEncoder.setTexture(cleanOutTexture, index: 1)
@@ -275,10 +269,10 @@ class Renderer {
             if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
                 computeEncoder.setComputePipelineState(logoComputePipelineState)
 
-                if let logoTex = calLogoTexture {
+                if let logoTex = cleanOutTexture {
 
 
-                    computeEncoder.setTexture(calLogoTexture, index: 0)
+                    computeEncoder.setTexture(cleanOutTexture, index: 0)
 
                     let threadgroupSize = MTLSizeMake(16, 16, 1);
 
@@ -292,7 +286,7 @@ class Renderer {
                     let h = logoComputePipelineState.maxTotalThreadsPerThreadgroup / w
                     let threadsPerThreadgroup = MTLSizeMake(w, h, 1)
 
-                    let threadsPerGrid = MTLSize(width: calLogoTexture.width,
+                    let threadsPerGrid = MTLSize(width: cleanOutTexture.width,
                                                  height: 1,
                                                  depth: 1)
 
@@ -318,7 +312,8 @@ class Renderer {
 
                 }
                 if (self.calLogoTexture != nil) {
-                    self.logoPointDetection(width: self.calLogoTexture.width, height: self.calLogoTexture.height)
+//                    self.logoPointDetection(width: self.calLogoTexture.width, height: self.calLogoTexture.height)
+                    self.fieldLogoDetection(width: self.calLogoTexture.width, height: self.calLogoTexture.height)
                 }
                 numFrames += 1
             })
@@ -367,6 +362,168 @@ class Renderer {
                 print("JAEMS")
             }
         }
+    }
+    
+    func fieldLogoDetection(width: Int, height: Int) {
+        if (topBottomTexture != nil) {
+            let tex = topBottomTexture!
+            let bytesPerPixel = 2
+
+            let bytesPerRow = tex.width * bytesPerPixel
+            
+            var data = [UInt16](repeating: 0, count: tex.width*tex.height)
+            
+            tex.getBytes(&data,
+                bytesPerRow: bytesPerRow,
+                from: MTLRegionMake2D(0, 0, tex.width, tex.height),
+                mipmapLevel: 0)
+            
+            var run_length = 0
+            var missed_sequential = 0
+            var max_run_length = 0
+            var max_run_index = -1
+            var run_index = 0
+            print(tex.width)
+            print(tex.height)
+            
+//             Finds longest run of values
+            for x in 0...(tex.width - 1) {
+                let curr_min = Int(Double(data[x]) / Double(UInt16.max) * Double(height))
+                let curr_max = Int(Double(data[x + tex.width]) / Double(UInt16.max) * Double(height))
+                if (min(curr_min, curr_max) > 0) {
+                    missed_sequential = 0
+                    if (run_length == 0) {
+                        run_index = x
+                    }
+                    run_length += 1
+                } else {
+                    if (missed_sequential) < 3 {
+                        missed_sequential += 1
+                    } else {
+                        if (run_length > max_run_length) {
+                            max_run_index = run_index
+                            max_run_length = run_length
+                        }
+                        missed_sequential = 0
+                        run_length = 0
+                    }
+                }
+            }
+
+            if (max_run_index < 0) {
+                return
+            }
+
+            var avg_y = 0
+            
+            var minsX: [Double] = []
+            var minsY: [Double] = []
+
+            // Finds center of pixel mass of the Cal logo
+            for x in max_run_index..<(max_run_index + max_run_length) {
+                let curr_min = Int(Double(data[x]) / Double(UInt16.max) * Double(height))
+                let curr_max = Int(Double(data[x + tex.width]) / Double(UInt16.max) * Double(height))
+                avg_y += (curr_max + curr_min) / 2
+                minsY.append(Double(curr_max / 2 + curr_min / 2))
+                minsX.append(Double(x))
+            }
+            avg_y /= max_run_length
+            let avg_x = max_run_index + max_run_length / 2
+            
+            // Plots a triangle of the center of mass in Metal
+            self.baryVertices = []
+            let x1 = xImageSpacetoNormalized(x: avg_x - 8); let y1 = yImageSpacetoNormalized(y: avg_y + 8)
+            self.baryVertices.append(Vertex(position: SIMD3(x1, y1, 0), color: SIMD4(0, 0, 1, 1)))
+            let x2 = xImageSpacetoNormalized(x: avg_x + 8); let y2 = yImageSpacetoNormalized(y: avg_y + 8)
+            self.baryVertices.append(Vertex(position: SIMD3(x2, y2, 0), color: SIMD4(0, 0, 1, 1)))
+            let x3 = xImageSpacetoNormalized(x: avg_x); let y3 = yImageSpacetoNormalized(y: avg_y - 8)
+            self.baryVertices.append(Vertex(position: SIMD3(x3, y3, 0), color: SIMD4(0, 0, 1, 1)))
+            
+            // Finds top line of the Cal Logo
+            let bottomLogoLine = linearRegression(minsX, minsY)
+            var slope = bottomLogoLine(1.0) - bottomLogoLine(0.0)
+            if (abs(slope) < 0.001) {
+                slope = 0.001
+            }
+            let perpendicularSlope = abs(0.0 - 1.0 / slope)
+            let normalVec = normalize(SIMD2(1, perpendicularSlope))
+            let linex1 = xImageSpacetoNormalized(x: max_run_index); let liney1 = yImageSpacetoNormalized(y: Int(bottomLogoLine(Double(max_run_index))))
+            let linex3 = xImageSpacetoNormalized(x: max_run_index  + max_run_length / 2); let liney3 = yImageSpacetoNormalized(y: 1)
+            let linex2 = xImageSpacetoNormalized(x: max_run_index + max_run_length); let liney2 = yImageSpacetoNormalized(y: Int(bottomLogoLine(Double(max_run_index + max_run_length))))
+            
+            let endpointOneY = Int(bottomLogoLine(Double(max_run_index)))
+            let endpointTwoY = Int(bottomLogoLine(Double(max_run_index + max_run_length)))
+            
+            
+            self.baryVertices.append(Vertex(position: SIMD3(linex1, liney1, 0), color: SIMD4(1, 0, 1, 1)))
+            self.baryVertices.append(Vertex(position: SIMD3(linex2, liney2, 0), color: SIMD4(1, 0, 1, 1)))
+            self.baryVertices.append(Vertex(position: SIMD3(linex3, liney3, 0), color: SIMD4(1, 0, 1, 1)))
+            
+            
+            if (numFrames % 90 != 28) {
+                var data2 = [UInt8](repeating: 0, count: calLogoTexture!.width*calLogoTexture!.height)
+                self.tileOutTexture!.getBytes(&data2, bytesPerRow: bytesPerRow / 2, from: MTLRegionMake2D(0, 0, calLogoTexture!.width, calLogoTexture!.height), mipmapLevel: 0)
+
+                let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
+                let bitsPerComponent = 8
+                let colorSpace = CGColorSpaceCreateDeviceGray()
+                let context = CGContext(data: &data2, width: calLogoTexture!.width, height: calLogoTexture!.height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow / 2, space: colorSpace, bitmapInfo: bitmapInfo.rawValue)
+
+                guard let dstImage = context?.makeImage() else { print("FAILED TO MAKE IMG")
+                    return
+                }
+
+
+                let asUI = UIImage(cgImage: dstImage, scale: 0.0, orientation: .up)
+
+
+                UIGraphicsBeginImageContextWithOptions(asUI.size, true, 0)
+                let cgContext = UIGraphicsGetCurrentContext()!
+
+                asUI.draw(in: CGRect(origin: CGPoint(x: 0, y: 0), size: asUI.size))
+                UIColor.red.set()
+
+
+                for i in 0...90 {
+                    var ellipseRect = CGRect(x: max_run_index + Int(Double(i * 20) * normalVec.x), y: endpointOneY + Int(Double(i * 20) * normalVec.y), width: 8, height: 8)
+                    cgContext.fillEllipse(in: ellipseRect)
+                    
+                    ellipseRect = CGRect(x: max_run_index + max_run_length + Int(Double(i * 20) * normalVec.x), y: endpointTwoY + Int(Double(i * 20) * normalVec.y), width: 8, height: 8)
+                    cgContext.fillEllipse(in: ellipseRect)
+                    
+                    ellipseRect = CGRect(x: avg_x + Int(Double(i * 20) * normalVec.x), y: avg_y + Int(Double(i * 20) * normalVec.y), width: 8, height: 8)
+                    cgContext.fillEllipse(in: ellipseRect)
+                }
+                
+                
+
+
+                UIColor.yellow.set()
+                var ellipseRect = CGRect(x: avg_x - 7, y: avg_y - 7, width: 14, height: 14)
+                cgContext.fillEllipse(in: ellipseRect)
+
+
+
+                guard let withPoints = UIGraphicsGetImageFromCurrentImageContext() else {
+                    return
+                }
+                
+                
+                print("hello")
+                
+            }
+        }
+    }
+    
+//    let firstMinX = 2.0 * (Float(firstBoxMinMedian.0) / Float(width)) - 1.0
+//    let firstMinY = 0.0 - (2.0 * (Float(firstBoxMinMedian.1) / Float(height)) - 1.0)
+    
+    func xImageSpacetoNormalized(x: Int) -> Float {
+        return 2.0 * (Float(x) / Float(self.tileOutTexture.width)) - 1.0
+    }
+    
+    func yImageSpacetoNormalized(y: Int) -> Float {
+        return 0.0 - (2.0 * (Float(y) / Float(self.tileOutTexture.height)) - 1.0)
     }
     
     func logoPointDetection(width: Int, height: Int) {
@@ -481,7 +638,7 @@ class Renderer {
             
             
             
-            if (numFrames % 30 == 32) {
+            if (numFrames % 30 == 0) {
                 var data2 = [UInt8](repeating: 0, count: calLogoTexture!.width*calLogoTexture!.height)
                 self.calLogoTexture!.getBytes(&data2, bytesPerRow: bytesPerRow / 2, from: MTLRegionMake2D(0, 0, calLogoTexture!.width, calLogoTexture!.height), mipmapLevel: 0)
 
@@ -818,7 +975,7 @@ class Renderer {
                                      1, -1, 0]
             
             let indices: [UInt16] = [0, 1, 2,
-                                    1, 2, 3]
+                                    5, 3, 4]
             
             let vertexBuffer = device.makeBuffer(bytes: self.baryVertices, length: self.baryVertices.count * MemoryLayout<Vertex>.size, options: [])
             

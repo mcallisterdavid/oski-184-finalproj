@@ -19,9 +19,14 @@ class ViewController: UIViewController, MTKViewDelegate, ARSessionDelegate {
     var configuration = ARWorldTrackingConfiguration()
     var renderer: Renderer!
     var depthBuffer: CVPixelBuffer!
+    
     var confidenceBuffer: CVPixelBuffer!
     var lineViews: [CAShapeLayer] = []
     var linesRendered: Int = 0
+    
+    func setCornerImage (img: UIImage) {
+        CornerImageView.image = img
+    }
     
     override func viewDidLoad() {
         super.viewDidLoad()
