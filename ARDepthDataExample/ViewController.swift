@@ -24,10 +24,6 @@ class ViewController: UIViewController, MTKViewDelegate, ARSessionDelegate {
     var lineViews: [CAShapeLayer] = []
     var linesRendered: Int = 0
     
-    func setCornerImage (img: UIImage) {
-        CornerImageView.image = img
-    }
-    
     override func viewDidLoad() {
         super.viewDidLoad()
         
@@ -41,13 +37,16 @@ class ViewController: UIViewController, MTKViewDelegate, ARSessionDelegate {
             view.backgroundColor = UIColor.clear
             view.delegate = self
             
+            let scnRender = SCNRenderer(device: view.device)
+//            scnRender.scene = 
+            
             guard view.device != nil else {
                 print("Metal is not supported on this device")
                 return
             }
             
             // Configure the renderer to draw to the view.
-            renderer = Renderer(session: session, metalDevice: view.device!, renderDestination: view)
+            renderer = Renderer(session: session, metalDevice: view.device!, renderDestination: view, scnRenderer: scnRender)
             
             
             

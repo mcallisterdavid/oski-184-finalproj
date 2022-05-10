@@ -42,6 +42,7 @@ let kImagePlaneVertexData: [Float] = [
 
 class Renderer {
     let session: ARSession
+    let sceneRenderer: SCNRenderer
     let device: MTLDevice
     let inFlightSemaphore = DispatchSemaphore(value: kMaxBuffersInFlight)
     var renderDestination: RenderDestinationProvider
@@ -68,7 +69,11 @@ class Renderer {
     
     var computePipelineState : MTLComputePipelineState!;
     
+    var logoRaycastComputePipelineState: MTLComputePipelineState!;
+    
     var cleanComputePipelineState : MTLComputePipelineState!;
+    
+    var greenWhiteCleanComputePipelineState : MTLComputePipelineState!;
     
     var logoComputePipelineState : MTLComputePipelineState!;
 
@@ -91,7 +96,13 @@ class Renderer {
     
     var cleanOutTexture: MTLTexture!
     
+    var whiteGreenCleanTexture: MTLTexture!
+    
     var calLogoTexture: MTLTexture!
+    
+    var logoRaycastOutTexture: MTLTexture!
+    
+    var logoRaycastTexture: MTLTexture!
     
     // Texture of height 2 storing the top and bottom y values for each vertical strip of the callogotexture
     var topBottomTexture: MTLTexture!
@@ -114,10 +125,11 @@ class Renderer {
     var viewportSizeDidChange: Bool = false
     
     // Initialize a renderer by setting up the AR session, GPU, and screen backing-store.
-    init(session: ARSession, metalDevice device: MTLDevice, renderDestination: RenderDestinationProvider) {
+    init(session: ARSession, metalDevice device: MTLDevice, renderDestination: RenderDestinationProvider, scnRenderer: SCNRenderer) {
         self.session = session
         self.device = device
         self.renderDestination = renderDestination
+        self.sceneRenderer = scnRenderer
         
         // Perform one-time setup of the Metal objects.
         loadMetal()
@@ -167,16 +179,21 @@ class Renderer {
                 renderPassDescriptor.tileWidth = 16
                 renderPassDescriptor.tileHeight = 16
                 renderPassDescriptor.threadgroupMemoryLength = 256
+                
 
                 
                 if let fogRenderEncoding = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
                     
                     // Set a label to identify this render pass in a captured Metal frame.
                     fogRenderEncoding.label = "MyFogRenderEncoder"
+                    
+                    
 
                     // Schedule the camera image and fog to be drawn to the screen.
                     doFogRenderPass(renderEncoder: fogRenderEncoding)
                     doBaryPass(renderEncoder: fogRenderEncoding)
+                    self.sceneRenderer.render(withViewport: CGRect(x: 0, y: 0, width: viewportSize.width, height: viewportSize.height), commandBuffer: commandBuffer, passDescriptor: renderPassDescriptor)
+                    
 
                     // Finish encoding commands.
                     fogRenderEncoding.endEncoding()
@@ -267,6 +284,39 @@ class Renderer {
             }
             
             if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
+                computeEncoder.setComputePipelineState(greenWhiteCleanComputePipelineState)
+
+                if let greenWhiteIn = tileOutTexture {
+
+
+                    computeEncoder.setTexture(greenWhiteIn, index: 0)
+
+                    let threadgroupSize = MTLSizeMake(16, 16, 1);
+
+                    var threadgroupCount = MTLSize();
+
+                    threadgroupCount.width  = (greenWhiteIn.width  + threadgroupSize.width -  1) / threadgroupSize.width;
+                    threadgroupCount.height = (greenWhiteIn.height + threadgroupSize.height - 1) / threadgroupSize.height;
+                    threadgroupCount.depth = 1
+
+                    let w = greenWhiteCleanComputePipelineState.threadExecutionWidth
+                    let h = greenWhiteCleanComputePipelineState.maxTotalThreadsPerThreadgroup / w
+                    let threadsPerThreadgroup = MTLSizeMake(w, h, 1)
+
+                    let threadsPerGrid = MTLSize(width: greenWhiteIn.width,
+                                                 height: greenWhiteIn.height,
+                                                 depth: 1)
+
+                    computeEncoder.setTexture(whiteGreenCleanTexture, index: 1)
+
+                    computeEncoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
+
+                }
+
+                computeEncoder.endEncoding()
+            }
+            
+            if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
                 computeEncoder.setComputePipelineState(logoComputePipelineState)
 
                 if let logoTex = cleanOutTexture {
@@ -293,11 +343,55 @@ class Renderer {
                     computeEncoder.setTexture(topBottomTexture, index: 1)
 
                     computeEncoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
+                    
+                    
+
+                }
+                computeEncoder.endEncoding()
+            }
+                
+                
+            if let greenWhite = self.tileOutTexture, let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
+                    computeEncoder.setComputePipelineState(logoRaycastComputePipelineState)
+
+                let inputs = self.fieldLogoDetection(width: self.calLogoTexture.width, height: self.calLogoTexture.height)
+                
+                if inputs.count > 0 {
+
+                    computeEncoder.setTexture(greenWhite, index: 0)
+
+                    let threadgroupSize = MTLSizeMake(16, 16, 1);
+
+                    var threadgroupCount = MTLSize();
+
+                    threadgroupCount.width  = 3;
+                    threadgroupCount.height = 1;
+                    threadgroupCount.depth = 1
+
+                    let w = logoRaycastComputePipelineState.threadExecutionWidth
+                    let h = logoRaycastComputePipelineState.maxTotalThreadsPerThreadgroup / w
+                    let threadsPerThreadgroup = MTLSizeMake(w, h, 1)
+
+                    let threadsPerGrid = MTLSize(width: 3,
+                                                 height: 1,
+                                                 depth: 1)
+                    
+                                
+                    let inputBuffer = device.makeBuffer(bytes: inputs, length: inputs.count * MemoryLayout<Float>.size, options: [])
+                                
+                    computeEncoder.setBuffer(inputBuffer, offset: 0, index: 0)
+                    
+                    computeEncoder.setTexture(logoRaycastOutTexture, index: 1)
+
+                    computeEncoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
 
                 }
 
                 computeEncoder.endEncoding()
             }
+
+                
+            
             
 //            applySobel(commandBuffer: commandBuffer)
             
@@ -311,10 +405,12 @@ class Renderer {
 //                    Task.init{await self.findLines()}
 
                 }
-                if (self.calLogoTexture != nil) {
-//                    self.logoPointDetection(width: self.calLogoTexture.width, height: self.calLogoTexture.height)
-                    self.fieldLogoDetection(width: self.calLogoTexture.width, height: self.calLogoTexture.height)
+                if (self.whiteGreenCleanTexture != nil) {
+                    self.readTileOut(width: self.whiteGreenCleanTexture.width, height: self.whiteGreenCleanTexture.height)
                 }
+//                if (self.calLogoTexture != nil) {
+//                    self.fieldLogoDetection(width: self.calLogoTexture.width, height: self.calLogoTexture.height)
+//                }
                 numFrames += 1
             })
             
@@ -327,36 +423,86 @@ class Renderer {
     
     
     
-    func readTileOut() async {
-        if (tileOutTexture != nil) {
-            let tex = tileOutTexture!
+    
+    
+    func readTileOut(width: Int, height: Int) {
+        if (logoRaycastOutTexture != nil) {
+            let tex = logoRaycastOutTexture!
             
-            let bytesPerPixel = 1
+            let bytesPerPixel = 2
             
             let bytesPerRow = tex.width * bytesPerPixel
             
-            var data = [UInt8](repeating: 0, count: tex.width*tex.height)
+            var data = [UInt16](repeating: 0, count: tex.width*tex.height)
+
+            
             
             tex.getBytes(&data,
                 bytesPerRow: bytesPerRow,
                 from: MTLRegionMake2D(0, 0, tex.width, tex.height),
                 mipmapLevel: 0)
-            
-            
-            let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
-            let bitsPerComponent = 8
-            let colorSpace = CGColorSpaceCreateDeviceGray()
-            let context = CGContext(data: &data, width: tex.width, height: tex.height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo.rawValue)
+        
             
             let m = data.max()!
-
-            // Creates the image from the graphics context
-            guard let dstImage = context?.makeImage() else { print("FAILED TO MAKE IMG")
+            
+            if (m < 10) {
                 return
             }
             
+            let pt1: [Int] = [Int(Double(data[0]) / Double(UInt16.max) * Double(width)), Int(Double(data[1]) / Double(UInt16.max) * Double(height))]
+            addMetalTriangleVerts(x: pt1[0], y: pt1[1])
+            let pt2: [Int] = [Int(Double(data[2]) / Double(UInt16.max) * Double(width)), Int(Double(data[3]) / Double(UInt16.max) * Double(height))]
+            addMetalTriangleVerts(x: pt2[0], y: pt2[1])
+            let pt3: [Int] = [Int(Double(data[4]) / Double(UInt16.max) * Double(width)), Int(Double(data[5]) / Double(UInt16.max) * Double(height))]
+            addMetalTriangleVerts(x: pt3[0], y: pt3[1])
+            let pt4: [Int] = [Int(Double(data[6]) / Double(UInt16.max) * Double(width)), Int(Double(data[7]) / Double(UInt16.max) * Double(height))]
+            addMetalTriangleVerts(x: pt4[0], y: pt4[1])
+            let pt5: [Int] = [Int(Double(data[8]) / Double(UInt16.max) * Double(width)), Int(Double(data[9]) / Double(UInt16.max) * Double(height))]
+            addMetalTriangleVerts(x: pt5[0], y: pt5[1])
             
-            let asUI = UIImage(cgImage: dstImage, scale: 0.0, orientation: .up)
+            // CUTOFF
+            
+//            var data2 = [UInt8](repeating: 0, count: whiteGreenCleanTexture!.width*whiteGreenCleanTexture!.height)
+//            self.whiteGreenCleanTexture!.getBytes(&data2, bytesPerRow: whiteGreenCleanTexture!.width, from: MTLRegionMake2D(0, 0, whiteGreenCleanTexture!.width, whiteGreenCleanTexture!.height), mipmapLevel: 0)
+//
+//            let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
+//            let bitsPerComponent = 8
+//            let colorSpace = CGColorSpaceCreateDeviceGray()
+//            let context = CGContext(data: &data2, width: whiteGreenCleanTexture!.width, height: whiteGreenCleanTexture!.height, bitsPerComponent: bitsPerComponent, bytesPerRow: whiteGreenCleanTexture!.width, space: colorSpace, bitmapInfo: bitmapInfo.rawValue)
+//
+//
+//            guard let dstImage = context?.makeImage() else { print("FAILED TO MAKE IMG")
+//                return
+//            }
+//
+//
+//            let asUI = UIImage(cgImage: dstImage, scale: 0.0, orientation: .up)
+//
+//
+//            UIGraphicsBeginImageContextWithOptions(asUI.size, true, 0)
+//            let cgContext = UIGraphicsGetCurrentContext()!
+//
+//            asUI.draw(in: CGRect(origin: CGPoint(x: 0, y: 0), size: asUI.size))
+//            UIColor.red.set()
+//
+//            var ellipseRect = CGRect(x: pt1[0] - 6, y: pt1[1] - 6, width: 12, height: 12)
+//            cgContext.fillEllipse(in: ellipseRect)
+//            
+//            ellipseRect = CGRect(x: pt2[0] - 6, y: pt2[1] - 6, width: 12, height: 12)
+//            cgContext.fillEllipse(in: ellipseRect)
+//
+//            ellipseRect = CGRect(x: pt3[0] - 6, y: pt3[1] - 6, width: 12, height: 12)
+//            cgContext.fillEllipse(in: ellipseRect)
+//
+//            ellipseRect = CGRect(x: pt4[0] - 6, y: pt4[1] - 6, width: 12, height: 12)
+//            cgContext.fillEllipse(in: ellipseRect)
+//
+//            ellipseRect = CGRect(x: pt5[0] - 6, y: pt5[1] - 6, width: 12, height: 12)
+//            cgContext.fillEllipse(in: ellipseRect)
+//
+//            guard let withPoints = UIGraphicsGetImageFromCurrentImageContext() else {
+//                return
+//            }
             
             if (m >= 1) {
                 print("JAEMS")
@@ -364,8 +510,8 @@ class Renderer {
         }
     }
     
-    func fieldLogoDetection(width: Int, height: Int) {
-        if (topBottomTexture != nil) {
+    func fieldLogoDetection(width: Int, height: Int) -> [Float] {
+        if (topBottomTexture != nil && whiteGreenCleanTexture != nil) {
             let tex = topBottomTexture!
             let bytesPerPixel = 2
 
@@ -411,7 +557,7 @@ class Renderer {
             }
 
             if (max_run_index < 0) {
-                return
+                return []
             }
 
             var avg_y = 0
@@ -447,6 +593,9 @@ class Renderer {
             }
             let perpendicularSlope = abs(0.0 - 1.0 / slope)
             let normalVec = normalize(SIMD2(1, perpendicularSlope))
+            let theta = 0.045
+            let rotated = SIMD2(normalVec.x * cos(theta) - normalVec.y * sin(theta), normalVec.x * sin(theta) + normalVec.y * cos(theta))
+            
             let linex1 = xImageSpacetoNormalized(x: max_run_index); let liney1 = yImageSpacetoNormalized(y: Int(bottomLogoLine(Double(max_run_index))))
             let linex3 = xImageSpacetoNormalized(x: max_run_index  + max_run_length / 2); let liney3 = yImageSpacetoNormalized(y: 1)
             let linex2 = xImageSpacetoNormalized(x: max_run_index + max_run_length); let liney2 = yImageSpacetoNormalized(y: Int(bottomLogoLine(Double(max_run_index + max_run_length))))
@@ -459,10 +608,12 @@ class Renderer {
             self.baryVertices.append(Vertex(position: SIMD3(linex2, liney2, 0), color: SIMD4(1, 0, 1, 1)))
             self.baryVertices.append(Vertex(position: SIMD3(linex3, liney3, 0), color: SIMD4(1, 0, 1, 1)))
             
+            return [Float(avg_x), Float(avg_y), Float(max_run_index), Float(endpointOneY), Float(max_run_index + max_run_length), Float(endpointTwoY), Float(normalVec.x), Float(normalVec.y), Float(rotated.x), Float(rotated.y)]
             
-            if (numFrames % 90 != 28) {
+            
+            if (numFrames % 90 == 108) {
                 var data2 = [UInt8](repeating: 0, count: calLogoTexture!.width*calLogoTexture!.height)
-                self.tileOutTexture!.getBytes(&data2, bytesPerRow: bytesPerRow / 2, from: MTLRegionMake2D(0, 0, calLogoTexture!.width, calLogoTexture!.height), mipmapLevel: 0)
+                self.whiteGreenCleanTexture!.getBytes(&data2, bytesPerRow: bytesPerRow / 2, from: MTLRegionMake2D(0, 0, calLogoTexture!.width, calLogoTexture!.height), mipmapLevel: 0)
 
                 let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
                 let bitsPerComponent = 8
@@ -470,7 +621,7 @@ class Renderer {
                 let context = CGContext(data: &data2, width: calLogoTexture!.width, height: calLogoTexture!.height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow / 2, space: colorSpace, bitmapInfo: bitmapInfo.rawValue)
 
                 guard let dstImage = context?.makeImage() else { print("FAILED TO MAKE IMG")
-                    return
+                    return []
                 }
 
 
@@ -482,37 +633,128 @@ class Renderer {
 
                 asUI.draw(in: CGRect(origin: CGPoint(x: 0, y: 0), size: asUI.size))
                 UIColor.red.set()
-
+                
+                let theta = 0.045
+                let rotated = SIMD2(normalVec.x * cos(theta) - normalVec.y * sin(theta), normalVec.x * sin(theta) + normalVec.y * cos(theta))
 
                 for i in 0...90 {
-                    var ellipseRect = CGRect(x: max_run_index + Int(Double(i * 20) * normalVec.x), y: endpointOneY + Int(Double(i * 20) * normalVec.y), width: 8, height: 8)
+                    var ellipseRect = CGRect(x: max_run_index + Int(Double(i * 20) * rotated.x), y: endpointOneY + Int(Double(i * 20) * rotated.y), width: 8, height: 8)
                     cgContext.fillEllipse(in: ellipseRect)
-                    
+
                     ellipseRect = CGRect(x: max_run_index + max_run_length + Int(Double(i * 20) * normalVec.x), y: endpointTwoY + Int(Double(i * 20) * normalVec.y), width: 8, height: 8)
                     cgContext.fillEllipse(in: ellipseRect)
-                    
+
                     ellipseRect = CGRect(x: avg_x + Int(Double(i * 20) * normalVec.x), y: avg_y + Int(Double(i * 20) * normalVec.y), width: 8, height: 8)
                     cgContext.fillEllipse(in: ellipseRect)
                 }
                 
+                UIColor.blue.set()
+                
+                // From right endpoint
+                var i = 0; var numIntersections = 0; var sincePrev = 1000
+                while (numIntersections < 2 && i < 400) {
+                    i += 1
+                    let x = max_run_index + max_run_length + Int(Double(i) * normalVec.x)
+                    let y = endpointTwoY + Int(Double(i) * normalVec.y)
+                    let texCoord = x + y * whiteGreenCleanTexture.width
+                    if (pixelNearby(x: x, y: y, data2: data2) && sincePrev > 30) {
+//                        let ellipseRect = CGRect(x: x, y: y, width: 8, height: 8)
+//                        cgContext.fillEllipse(in: ellipseRect)
+                        addMetalTriangleVerts(x: x, y: y)
+                        
+//                        let x1 = xImageSpacetoNormalized(x: x); let y1 = yImageSpacetoNormalized(y: y + 8)
+//                        self.baryVertices.append(Vertex(position: SIMD3(x1, y1, 0), color: SIMD4(0, 0, 1, 1)))
+//                        let x2 = xImageSpacetoNormalized(x: x + 8); let y2 = yImageSpacetoNormalized(y: y + 8)
+//                        self.baryVertices.append(Vertex(position: SIMD3(x2, y2, 0), color: SIMD4(0, 0, 1, 1)))
+//                        let x3 = xImageSpacetoNormalized(x: x); let y3 = yImageSpacetoNormalized(y: y - 8)
+//                        self.baryVertices.append(Vertex(position: SIMD3(x3, y3, 0), color: SIMD4(0, 0, 1, 1)))
+                        sincePrev = 0
+                        numIntersections += 1
+                    } else {
+                        sincePrev += 1
+                    }
+                    
+                }
+                
+                
+                
+                // From left endpoint
+                i = 0; numIntersections = 0; sincePrev = 1000
+                while (numIntersections < 1 && i < 400) {
+                    i += 1
+                    let x = max_run_index + Int(Double(i) * rotated.x)
+                    let y = endpointOneY + Int(Double(i) * rotated.y)
+                    let texCoord = x + y * whiteGreenCleanTexture.width
+                    if (pixelNearby(x: x, y: y, data2: data2) && sincePrev > 30) {
+                        addMetalTriangleVerts(x: x, y: y)
+                        sincePrev = 0
+                        numIntersections += 1
+                    } else {
+                        sincePrev += 1
+                    }
+                    
+                }
+                
+                
+                
+                // From center of mass
+                i = 0; numIntersections = 0; sincePrev = 1000
+                while (numIntersections < 2 && i < 400) {
+                    i += 1
+                    let x = avg_x + Int(Double(i) * normalVec.x)
+                    let y = avg_y + Int(Double(i) * normalVec.y)
+                    let texCoord = x + y * whiteGreenCleanTexture.width
+                    if (pixelNearby(x: x, y: y, data2: data2) && sincePrev > 30) {
+//                        let ellipseRect = CGRect(x: x, y: y, width: 8, height: 8)
+//                        cgContext.fillEllipse(in: ellipseRect)
+                        addMetalTriangleVerts(x: x, y: y)
+                        sincePrev = 0
+                        numIntersections += 1
+                    } else {
+                        sincePrev += 1
+                    }
+                    
+                }
                 
 
 
-                UIColor.yellow.set()
-                var ellipseRect = CGRect(x: avg_x - 7, y: avg_y - 7, width: 14, height: 14)
-                cgContext.fillEllipse(in: ellipseRect)
-
-
-
-                guard let withPoints = UIGraphicsGetImageFromCurrentImageContext() else {
-                    return
-                }
+//                UIColor.yellow.set()
+//                var ellipseRect = CGRect(x: avg_x - 7, y: avg_y - 7, width: 14, height: 14)
+//                cgContext.fillEllipse(in: ellipseRect)
+//
+//
+//
+//                guard let withPoints = UIGraphicsGetImageFromCurrentImageContext() else {
+//                    return
+//                }
                 
                 
                 print("hello")
                 
             }
         }
+        return []
+    }
+    
+    func addMetalTriangleVerts(x: Int, y: Int) {
+        var i = xImageSpacetoNormalized(x: x + 9); var j = yImageSpacetoNormalized(y: y + 9)
+        self.baryVertices.append(Vertex(position: SIMD3(i, j, 0), color: SIMD4(1, 0, 0, 1)))
+        i = xImageSpacetoNormalized(x: x - 9); j = yImageSpacetoNormalized(y: y + 9)
+        self.baryVertices.append(Vertex(position: SIMD3(i, j, 0), color: SIMD4(1, 0, 0, 1)))
+        i = xImageSpacetoNormalized(x: x); j = yImageSpacetoNormalized(y: y - 9)
+        self.baryVertices.append(Vertex(position: SIMD3(i, j, 0), color: SIMD4(1, 0, 0, 1)))
+    }
+    
+    func pixelNearby(x: Int, y: Int, data2: UnsafePointer<UInt8>) -> Bool{
+        for i in x-2...x+2 {
+            for j in y-2...y+2 {
+                let texCoord = i + j * whiteGreenCleanTexture.width
+                if (data2[texCoord] > 10) {
+                    return true
+                }
+            }
+        }
+        return false
     }
     
 //    let firstMinX = 2.0 * (Float(firstBoxMinMedian.0) / Float(width)) - 1.0
@@ -541,7 +783,7 @@ class Renderer {
                 from: MTLRegionMake2D(0, 0, tex.width, tex.height),
                 mipmapLevel: 0)
             
-//
+
             var run_length = 0
             var zeroes = data[0] < 1
             var runs: [[Int]] = []
@@ -847,9 +1089,22 @@ class Renderer {
             print("Failed to create second compute pipeline state, error \(error)")
         }
         
+        do {
+            self.greenWhiteCleanComputePipelineState = try device.makeComputePipelineState(function: f2)
+        } catch let error {
+            print("Failed to create second compute pipeline state, error \(error)")
+        }
+        
         let f3 : MTLFunction = defaultLibrary.makeFunction(name: "logoDetect")!
         do {
             self.logoComputePipelineState = try device.makeComputePipelineState(function: f3)
+        } catch let error {
+            print("Failed to create second compute pipeline state, error \(error)")
+        }
+        
+        let f4 : MTLFunction = defaultLibrary.makeFunction(name: "raycastFromLogo")!
+        do {
+            self.logoRaycastComputePipelineState = try device.makeComputePipelineState(function: f4)
         } catch let error {
             print("Failed to create second compute pipeline state, error \(error)")
         }
@@ -974,8 +1229,14 @@ class Renderer {
                                      -1, -1, 0,
                                      1, -1, 0]
             
-            let indices: [UInt16] = [0, 1, 2,
-                                    5, 3, 4]
+//            var indices: [UInt16] = []
+//
+//            let numTris = 7
+//            for i in 1...numTris * 3 {
+//                indices.append(UInt16(i))
+//            }
+            
+            let indices: [UInt16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
             
             let vertexBuffer = device.makeBuffer(bytes: self.baryVertices, length: self.baryVertices.count * MemoryLayout<Vertex>.size, options: [])
             
@@ -1062,6 +1323,13 @@ class Renderer {
         cleanOutDescriptor.usage = [.shaderRead, .shaderWrite]
         cleanOutTexture = device.makeTexture(descriptor: cleanOutDescriptor)
         
+//        let cleanOutDescriptor = MTLTextureDescriptor()
+//        cleanOutDescriptor.pixelFormat = .r8Unorm
+//        cleanOutDescriptor.width = width
+//        cleanOutDescriptor.height = height
+//        cleanOutDescriptor.usage = [.shaderRead, .shaderWrite]
+        whiteGreenCleanTexture = device.makeTexture(descriptor: cleanOutDescriptor)
+        
         let calLogoDescriptor = MTLTextureDescriptor()
         calLogoDescriptor.pixelFormat = .r8Unorm
         calLogoDescriptor.width = width
@@ -1075,6 +1343,20 @@ class Renderer {
         topBottomDescriptor.height = 2
         topBottomDescriptor.usage = [.shaderRead, .shaderWrite]
         topBottomTexture = device.makeTexture(descriptor: topBottomDescriptor)
+        
+        let logoRaycastDescriptor = MTLTextureDescriptor()
+        logoRaycastDescriptor.pixelFormat = .r16Unorm
+        logoRaycastDescriptor.width = 10
+        logoRaycastDescriptor.height = 1
+        logoRaycastDescriptor.usage = [.shaderRead, .shaderWrite]
+        logoRaycastTexture = device.makeTexture(descriptor: logoRaycastDescriptor)
+        
+        let logoRaycastOutDescriptor = MTLTextureDescriptor()
+        logoRaycastOutDescriptor.pixelFormat = .r16Unorm
+        logoRaycastOutDescriptor.width = 10
+        logoRaycastOutDescriptor.height = 1
+        logoRaycastOutDescriptor.usage = [.shaderRead, .shaderWrite]
+        logoRaycastOutTexture = device.makeTexture(descriptor: logoRaycastOutDescriptor)
         
 //        blurFilter = MPSImageGaussianBlur(device: device, sigma: 8)
         let luminanceWeights: [Float] = [ 0.333, 0.334, 0.333 ]

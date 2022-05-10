@@ -118,6 +118,39 @@ typedef struct {
     float2 texCoordScene;
 } FogColorInOut;
 
+int island_two(texture2d<float, access::read> logoTex, int x, int y) {
+    int total = 0;
+    for (int i = 0; i < 6; i++) {
+        float curr = logoTex.read(uint2(x + i, y)).r;
+        if (curr > 0.5) {
+            total += 1;
+        }
+    }
+    
+    for (int i = 0; i < 6; i++) {
+        float curr = logoTex.read(uint2(x - i, y)).r;
+        if (curr > 0.5) {
+            total += 1;
+        }
+    }
+    
+    for (int i = 0; i < 6; i++) {
+        float curr = logoTex.read(uint2(x, y + i)).r;
+        if (curr > 0.5) {
+            total += 1;
+        }
+    }
+    
+    for (int i = 0; i < 6; i++) {
+        float curr = logoTex.read(uint2(x, y - i)).r;
+        if (curr > 0.5) {
+            total += 1;
+        }
+    }
+    
+    return total;
+}
+
 int island(texture2d<float, access::read> logoTex, int x, int y) {
     int total = 0;
     for (int i = 0; i < 10; i++) {
@@ -157,6 +190,85 @@ int island(texture2d<float, access::read> logoTex, int x, int y) {
     }
     
     return total;
+}
+
+//var i = 0; var numIntersections = 0; var sincePrev = 1000
+//while (numIntersections < 2 && i < 400) {
+//    i += 1
+//    let x = max_run_index + max_run_length + Int(Double(i) * normalVec.x)
+//    let y = endpointTwoY + Int(Double(i) * normalVec.y)
+//    let texCoord = x + y * whiteGreenCleanTexture.width
+//    if (pixelNearby(x: x, y: y, data2: data2) && sincePrev > 30) {
+//        sincePrev = 0
+//        numIntersections += 1
+//    } else {
+//        sincePrev += 1
+//    }
+//
+//}
+
+kernel void raycastFromLogo(texture2d<float, access::read> greenWhite [[texture(0)]],
+                            const device float* inputs [[ buffer(0) ]],
+                            texture2d<float, access::write> output [[texture(1)]],
+                            uint2 gid [[thread_position_in_grid]]) {
+    int i = 0.0;
+    int sincePrev = 1000;
+    int numIntersection = 0;
+    if (gid.x == 0) {
+        // Left Endpoint
+        while (numIntersection < 1 && i < 400) {
+            i += 1;
+            int x = inputs[2] + int(float(i) * inputs[8]);
+            int y = inputs[3] + int(float(i) * inputs[9]);
+            if (island_two(greenWhite, x, y) > 0 &&  sincePrev > 30) {
+                sincePrev = 0;
+                output.write(float(x + 6) / greenWhite.get_width(), uint2(4, 0));
+                output.write(float(y + 6) / greenWhite.get_height(), uint2(5, 0));
+                numIntersection += 1;
+            } else {
+                sincePrev += 1;
+            }
+            
+        }
+    } else if (gid.x == 1) {
+        // Right endpoint
+        while (numIntersection < 2 && i < 400) {
+            i += 1;
+            int x = inputs[4] + int(float(i) * inputs[6]);
+            int y = inputs[5] + int(float(i) * inputs[7]);
+            if (island_two(greenWhite, x, y) > 0 &&  sincePrev > 30) {
+                sincePrev = 0;
+                output.write(float(x + 6) / greenWhite.get_width(), uint2(numIntersection * 2, 0));
+                output.write(float(y + 6) / greenWhite.get_height(), uint2(numIntersection * 2 + 1, 0));
+                numIntersection += 1;
+            } else {
+                sincePrev += 1;
+            }
+            
+        }
+    } else if (gid.x == 2) {
+//        let x = avg_x + Int(Double(i) * normalVec.x)
+//        let y = avg_y + Int(Double(i) * normalVec.y)
+        // Center of Mass
+        while (numIntersection < 2 && i < 400) {
+            i += 1;
+            int x = inputs[0] + int(float(i) * inputs[6]);
+            int y = inputs[1] + int(float(i) * inputs[7]);
+            if (island_two(greenWhite, x, y) > 0 &&  sincePrev > 30) {
+                sincePrev = 0;
+                output.write(float(x + 6) / greenWhite.get_width(), uint2(6 + numIntersection * 2, 0));
+                output.write(float(y + 6) / greenWhite.get_height(), uint2(6 + numIntersection * 2 + 1, 0));
+                numIntersection += 1;
+            } else {
+                sincePrev += 1;
+            }
+            
+        }
+        
+    } else {
+        
+    }
+    
 }
 
 
@@ -210,14 +322,14 @@ kernel void imageClean(texture2d<float, access::read> greenWhiteDiff [[texture(0
     float4 imageIn = greenWhiteDiff.read(gid);
 
     // threshold for doing random sampling
-    float threshold = 0.5;
+    float threshold = 0.3;
 
     // random number generator
     Loki rng = Loki(gid.x, gid.y, imageIn[0]);
     // radius for random sampling
     int r = 10;
     // number of random samples
-    int n = 20;
+    int n = 30;
 
     if (imageIn.r > threshold) {
         int count = 0; // how many samples are white
@@ -230,7 +342,7 @@ kernel void imageClean(texture2d<float, access::read> greenWhiteDiff [[texture(0
             if (sample[0] > threshold)
                 count += 1;
         }
-        if (count > n / 4) {
+        if (count > 6) {
             output.write(1.0, gid);
         } else {
             output.write(0.0, gid);
