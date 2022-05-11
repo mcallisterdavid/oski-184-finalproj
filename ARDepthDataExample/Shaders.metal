@@ -445,7 +445,7 @@ texture2d<float, access::sample> cameraImageTextureY [[ texture(0) ]],
 texture2d<float, access::sample> cameraImageTextureCbCr [[ texture(1) ]],
 depth2d<float, access::sample> arDepthTexture [[ texture(2) ]],
 texture2d<uint> arDepthConfidence [[ texture(3) ]],
-texture2d<float, access::write> lineDraw [[ texture(4) ]])
+texture2d<float, access::sample> sceneTexture [[ texture(4) ]])
 {
     // Whether to show the confidence debug visualization.
     // - Tag: ConfidenceVisualization
@@ -475,7 +475,14 @@ texture2d<float, access::write> lineDraw [[ texture(4) ]])
 //    float edge = cameraImageTextureY.sample(s, in.texCoordCamera).r;
 //
 //    rgb = float4(edge, edge, edge, 1);
-    half4 cameraColor = half4(rgb);
+    float4 sceneSample = sceneTexture.sample(s, in.texCoordCamera);
+    half4 cameraColor;
+    if (sceneSample.r + sceneSample.g + sceneSample.b > 0) {
+        cameraColor = half4(sceneSample);
+    } else {
+        cameraColor = half4(rgb);
+    }
+    
 
     
 

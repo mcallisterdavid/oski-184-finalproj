@@ -38,7 +38,20 @@ class ViewController: UIViewController, MTKViewDelegate, ARSessionDelegate {
             view.delegate = self
             
             let scnRender = SCNRenderer(device: view.device)
-//            scnRender.scene = 
+            guard let myScene = SCNScene(named: "teddy3.scn") else {
+                fatalError("Unable to load scene file")
+            }
+
+            myScene.background.contents = UIColor.clear
+            
+            scnRender.autoenablesDefaultLighting = true
+            
+//            scnRender.scene?.background
+            
+            
+            scnRender.scene = myScene
+            
+            
             
             guard view.device != nil else {
                 print("Metal is not supported on this device")

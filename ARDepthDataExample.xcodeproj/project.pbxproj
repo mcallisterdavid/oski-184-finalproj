@@ -18,7 +18,10 @@
 		5C2D7D0F2822533300500165 /* loki_header.metal in Sources */ = {isa = PBXBuildFile; fileRef = 5C2D7D0D2822533300500165 /* loki_header.metal */; };
 		718E55BA2289C30A00A9B13B /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 718E55B92289C30A00A9B13B /* README.md */; };
 		7B1A50622829E054000CB59D /* LinearRegression.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1A50612829E054000CB59D /* LinearRegression.swift */; };
+		7B1A5067282A5D3A000CB59D /* TestScene.scn in Resources */ = {isa = PBXBuildFile; fileRef = 7B1A5066282A5D3A000CB59D /* TestScene.scn */; };
 		7B77D3E32818D6E700A289BC /* hough.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B77D3E22818D6E700A289BC /* hough.swift */; };
+		7BEB9908282A5DE10060C3AA /* teddy3.scn in Resources */ = {isa = PBXBuildFile; fileRef = 7BEB9907282A5DE10060C3AA /* teddy3.scn */; };
+		7BEB990A282B46CD0060C3AA /* QuarticSolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BEB9909282B46CD0060C3AA /* QuarticSolver.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,9 +45,12 @@
 		7B1A5063282A0AB8000CB59D /* AR Session 10.mov */ = {isa = PBXFileReference; lastKnownFileType = video.quicktime; path = "AR Session 10.mov"; sourceTree = "<group>"; };
 		7B1A5064282A0AB8000CB59D /* AR Session 10.mov */ = {isa = PBXFileReference; lastKnownFileType = video.quicktime; name = "AR Session 10.mov"; path = "../AR Session 10.mov"; sourceTree = "<group>"; };
 		7B1A5065282A0B35000CB59D /* AR Session 6.mov */ = {isa = PBXFileReference; lastKnownFileType = video.quicktime; path = "AR Session 6.mov"; sourceTree = "<group>"; };
+		7B1A5066282A5D3A000CB59D /* TestScene.scn */ = {isa = PBXFileReference; lastKnownFileType = file.bplist; path = TestScene.scn; sourceTree = "<group>"; };
 		7B77D3E22818D6E700A289BC /* hough.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = hough.swift; sourceTree = "<group>"; };
 		7B77D3E42818D71D00A289BC /* AR Session 11.mov */ = {isa = PBXFileReference; lastKnownFileType = video.quicktime; name = "AR Session 11.mov"; path = "../AR Session 11.mov"; sourceTree = "<group>"; };
 		7BD4AA872821EF35000B790A /* AR Session 5.mov */ = {isa = PBXFileReference; lastKnownFileType = video.quicktime; path = "AR Session 5.mov"; sourceTree = "<group>"; };
+		7BEB9907282A5DE10060C3AA /* teddy3.scn */ = {isa = PBXFileReference; lastKnownFileType = file.bplist; path = teddy3.scn; sourceTree = "<group>"; };
+		7BEB9909282B46CD0060C3AA /* QuarticSolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuarticSolver.swift; sourceTree = "<group>"; };
 		DEA7FABAACADB2E49BBF3FDC /* LICENSE.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; path = LICENSE.txt; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -62,6 +68,9 @@
 		11FD6F4022835A6B00775EAA = {
 			isa = PBXGroup;
 			children = (
+				7BEB9909282B46CD0060C3AA /* QuarticSolver.swift */,
+				7B1A5066282A5D3A000CB59D /* TestScene.scn */,
+				7BEB9907282A5DE10060C3AA /* teddy3.scn */,
 				7B1A5065282A0B35000CB59D /* AR Session 6.mov */,
 				7B1A5063282A0AB8000CB59D /* AR Session 10.mov */,
 				7B1A5064282A0AB8000CB59D /* AR Session 10.mov */,
@@ -187,6 +196,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7B1A5067282A5D3A000CB59D /* TestScene.scn in Resources */,
+				7BEB9908282A5DE10060C3AA /* teddy3.scn in Resources */,
 				11FD6F5C22835A6B00775EAA /* LaunchScreen.storyboard in Resources */,
 				11FD6F5922835A6B00775EAA /* Assets.xcassets in Resources */,
 				718E55BA2289C30A00A9B13B /* README.md in Resources */,
@@ -202,6 +213,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				11FD6F4F22835A6B00775EAA /* Shaders.metal in Sources */,
+				7BEB990A282B46CD0060C3AA /* QuarticSolver.swift in Sources */,
 				5C2D7D0F2822533300500165 /* loki_header.metal in Sources */,
 				11FD6F5222835A6B00775EAA /* Renderer.swift in Sources */,
 				7B77D3E32818D6E700A289BC /* hough.swift in Sources */,

@@ -104,6 +104,14 @@ class Renderer {
     
     var logoRaycastTexture: MTLTexture!
     
+    var logoStart: [Int]!
+    
+    var logoCoM: [Int]!
+    
+    var ogTransform: SCNMatrix4!
+    
+    var sceneTexture: MTLTexture!
+    
     // Texture of height 2 storing the top and bottom y values for each vertical strip of the callogotexture
     var topBottomTexture: MTLTexture!
     
@@ -130,6 +138,7 @@ class Renderer {
         self.device = device
         self.renderDestination = renderDestination
         self.sceneRenderer = scnRenderer
+        
         
         // Perform one-time setup of the Metal objects.
         loadMetal()
@@ -170,17 +179,95 @@ class Renderer {
 //            applySobel(commandBuffer: commandBuffer)
 //            applyGaussianBlur(commandBuffer: commandBuffer)
             
+            if let renderPassDescriptor = renderDestination.currentRenderPassDescriptor, let currentDrawable = renderDestination.currentDrawable, let offscreenTexture = sceneTexture {
+                
+                renderPassDescriptor.colorAttachments[0].texture = offscreenTexture
+                renderPassDescriptor.colorAttachments[0].loadAction = .clear
+                renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0.0); //green
+                renderPassDescriptor.colorAttachments[0].storeAction = .store
+                
+//                sceneRenderer.scene!.rootNode.camera?.projectionTransform = SCNMatrix4(session.currentFrame?.camera.intrinsics)
+                
+                if (sceneRenderer.pointOfView != nil && self.logoCoM != nil) {
+                
+                    if (self.ogTransform == nil) {
+                        self.ogTransform = sceneRenderer.pointOfView!.transform
+                    }
+                    
+                    let column0: SIMD4<Float> = [1, 0, 0, 0]
+                    let column1: SIMD4<Float> = [0, 0.5, 0.8, 0]
+                    let column2: SIMD4<Float> = [0, -0.8, 0.5, 0]
+                    let column3: SIMD4<Float> = [0, -60, 53, 1]
+                    let transform = simd_float4x4(columns: (column0,
+                        column1,
+                        column2,
+                        column3))
+                    
+                    
+                    let test_extrinsic = simd_float4x4(columns: ([1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [100, 0, -100, 1]))
+                    
+    //                let anch = ARAnchor(transform: transform)
+                    
+                    let camIntrins = session.currentFrame?.camera.intrinsics
+                    
+                    let intrinsic = simd_float4x3(columns: (camIntrins!.columns.0, camIntrins!.columns.1, camIntrins!.columns.2, [0, 0, 0]))
+                    
+                    print(intrinsic * test_extrinsic)
+                    
+                    let theta = Float(numFrames) * Float.pi / 30.0
+                    var extrinsic = simd_float4x4(columns: ([1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [cos(theta) * 1000, sin(theta) * 1000, 0, 1]))
+                    
+    //                let intrinsic_two = simd_float4x4(columns: (camIntrins!.columns.0, camIntrins!.columns.1, camIntrins!.columns.2, [0, 0, 0]))
+                    let mulled = intrinsic * extrinsic
+                    
+//                    SCNMatrix4MakeRotation(<#T##angle: Float##Float#>, <#T##x: Float##Float#>, <#T##y: Float##Float#>, <#T##z: Float##Float#>)
+                    
+                    
+                    
+                    let logoDiff = [self.logoCoM[0] - self.logoStart[0], self.logoCoM[1] - self.logoStart[1]]
+                    
+                    let rotate = SCNMatrix4MakeRotation(Float(logoDiff[0]) / 1100, 0, 0.45, 1)
+                    
+                    let translate = SCNMatrix4Translate(ogTransform, 0.0 - Float(logoDiff[0]) / 15, 0.0 - Float(logoDiff[1]) / 160, 0)
+                    
+//                    sceneRenderer.pointOfView?.transform = SCNMatrix4Mult(ogTransform, SCNMatrix4MakeScale(1 + 0.3 * sin(theta), 1 + 0.3 * sin(theta), 1 + 0.3 * sin(theta)))
+                    
+                    sceneRenderer.pointOfView?.transform = SCNMatrix4Mult(translate, rotate)
+                    
+//                    sceneRenderer.pointOfView?.transform = translate
+                    
+                    
+                    
+    //                print(intrinsic * extrinsic)
+                    
+                    
+    //                let t = SIMD4(mulled.columns.0, 0)
+                    
+                
+                    
+                    let appended = simd_float4x4(columns: (SIMD4(mulled.columns.0, 0), SIMD4(mulled.columns.1, 0), SIMD4(mulled.columns.2, 0), SIMD4(mulled.columns.0, 1)))
+                
+    //                print(camIntrins)
+    //                print(session.currentFrame?.camera.eulerAngles)
+    //                session.add(anchor: anch)
+                    
+    //                print(sceneRenderer.pointOfView?.transform)
+    //                sceneRenderer.pointOfView?.transform = SCNMatrix4(appended)
+                
+                }
+                
+                
+                
+                
+                self.sceneRenderer.render(atTime: CFTimeInterval(), viewport: CGRect(x: 0, y: 0, width: offscreenTexture.width, height: offscreenTexture.height), commandBuffer: commandBuffer, passDescriptor: renderPassDescriptor)
+            }
+
             
             
             if let renderPassDescriptor = renderDestination.currentRenderPassDescriptor, let currentDrawable = renderDestination.currentDrawable {
                 
                 
                 // Check these values
-                renderPassDescriptor.tileWidth = 16
-                renderPassDescriptor.tileHeight = 16
-                renderPassDescriptor.threadgroupMemoryLength = 256
-                
-
                 
                 if let fogRenderEncoding = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
                     
@@ -191,12 +278,15 @@ class Renderer {
 
                     // Schedule the camera image and fog to be drawn to the screen.
                     doFogRenderPass(renderEncoder: fogRenderEncoding)
-                    doBaryPass(renderEncoder: fogRenderEncoding)
-                    self.sceneRenderer.render(withViewport: CGRect(x: 0, y: 0, width: viewportSize.width, height: viewportSize.height), commandBuffer: commandBuffer, passDescriptor: renderPassDescriptor)
+//                    doBaryPass(renderEncoder: fogRenderEncoding)
                     
-
+                    
                     // Finish encoding commands.
                     fogRenderEncoding.endEncoding()
+                    
+                    
+                    
+                    
                 }
                 
                 // Schedule a present once the framebuffer is complete using the current drawable.
@@ -205,6 +295,7 @@ class Renderer {
                 
             }
             
+                        
             
             if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
                 computeEncoder.setComputePipelineState(computePipelineState)
@@ -349,12 +440,14 @@ class Renderer {
                 }
                 computeEncoder.endEncoding()
             }
+            
+            var inputs: [Float] = []
                 
                 
             if let greenWhite = self.tileOutTexture, let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
                     computeEncoder.setComputePipelineState(logoRaycastComputePipelineState)
 
-                let inputs = self.fieldLogoDetection(width: self.calLogoTexture.width, height: self.calLogoTexture.height)
+                inputs = self.fieldLogoDetection(width: self.calLogoTexture.width, height: self.calLogoTexture.height)
                 
                 if inputs.count > 0 {
 
@@ -405,8 +498,8 @@ class Renderer {
 //                    Task.init{await self.findLines()}
 
                 }
-                if (self.whiteGreenCleanTexture != nil) {
-                    self.readTileOut(width: self.whiteGreenCleanTexture.width, height: self.whiteGreenCleanTexture.height)
+                if (self.whiteGreenCleanTexture != nil && inputs.count > 0) {
+                    self.readTileOut(width: self.whiteGreenCleanTexture.width, height: self.whiteGreenCleanTexture.height, CoMX: inputs[0], CoMY: inputs[1])
                 }
 //                if (self.calLogoTexture != nil) {
 //                    self.fieldLogoDetection(width: self.calLogoTexture.width, height: self.calLogoTexture.height)
@@ -420,12 +513,12 @@ class Renderer {
             
         }
     }
+   
     
     
     
     
-    
-    func readTileOut(width: Int, height: Int) {
+    func readTileOut(width: Int, height: Int, CoMX: Float, CoMY: Float) {
         if (logoRaycastOutTexture != nil) {
             let tex = logoRaycastOutTexture!
             
@@ -449,16 +542,85 @@ class Renderer {
                 return
             }
             
+            let m0 = simd_float2(CoMX, CoMY)
+            let X0 = simd_float3(0, 0, 0)
+            
             let pt1: [Int] = [Int(Double(data[0]) / Double(UInt16.max) * Double(width)), Int(Double(data[1]) / Double(UInt16.max) * Double(height))]
             addMetalTriangleVerts(x: pt1[0], y: pt1[1])
+            
+            let m1 = simd_float2(xImageSpacetoNormalized(x: pt1[0]), yImageSpacetoNormalized(y: pt1[1]))
+            let X1 = simd_float3(5, -18, 0)
+            
+            // Right tick mark
             let pt2: [Int] = [Int(Double(data[2]) / Double(UInt16.max) * Double(width)), Int(Double(data[3]) / Double(UInt16.max) * Double(height))]
             addMetalTriangleVerts(x: pt2[0], y: pt2[1])
+            
+            let m2 = simd_float2(xImageSpacetoNormalized(x: pt2[0]), yImageSpacetoNormalized(y: pt2[1]))
+            let X2 = simd_float3(4, -23, 0)
+            
             let pt3: [Int] = [Int(Double(data[4]) / Double(UInt16.max) * Double(width)), Int(Double(data[5]) / Double(UInt16.max) * Double(height))]
             addMetalTriangleVerts(x: pt3[0], y: pt3[1])
+            
+            let m3 = simd_float2(xImageSpacetoNormalized(x: pt3[0]), yImageSpacetoNormalized(y: pt3[1]))
+            let X3 = simd_float3(-5, -24, 0)
+            
+            
             let pt4: [Int] = [Int(Double(data[6]) / Double(UInt16.max) * Double(width)), Int(Double(data[7]) / Double(UInt16.max) * Double(height))]
             addMetalTriangleVerts(x: pt4[0], y: pt4[1])
             let pt5: [Int] = [Int(Double(data[8]) / Double(UInt16.max) * Double(width)), Int(Double(data[9]) / Double(UInt16.max) * Double(height))]
             addMetalTriangleVerts(x: pt5[0], y: pt5[1])
+            
+            
+            // Perform algorithm
+            
+            
+            // Step 1
+            
+            let n_x = (X1 - X0) / sqrt(dot((X1 - X0), (X1 - X0)))
+            let x3x1 = X2 - X0
+            let inter = cross(n_x, x3x1)
+            let n_z = inter / sqrt(dot(inter, inter))
+            let n_y = cross(n_z, n_x)
+            
+            let N = simd_float3x3(columns: (n_x, n_y, n_z))
+            
+            let X_p_0 = N.transpose * (X0 - X0)
+            let X_p_1 = N.transpose * (X1 - X0)
+            let X_p_2 = N.transpose * (X2 - X0)
+            
+            // Step 2
+            
+            let a = simd_length(X1 - X0)
+            let c: Float = 0.1
+            let b = sqrt(dot((X2 - X0), (X2 - X0)) - c*c)
+            
+            let p = b/a
+            let q = (b*b + c*c) / (a*a)
+            
+            let A = simd_float3x2(columns: (-m0, m1, simd_float2.zero))
+            let B = simd_float3x2(columns: (-m0, simd_float2.zero, m2))
+            let C = B - p*A
+            
+            let f_1 = p
+            let f_2 = dot(m1, m2)
+            let f_4 = (1 - 2*p) * dot(m0, m1)
+            let f_5 = dot(m0, m2)
+            let f_6 = 1 - p
+            
+            let g_1 = q
+            let g_3: Float = -1
+            let g_4 = -2 * q * dot(m0, m1)
+            let g_5 = 2 * f_5
+            let g_6 = q - 1
+            
+            let h_1 = f_2 * f_2 * g_1 - f_1 * f_1
+            let h_2 = f_2 * f_2 * g_4 + 2 * f_2 * f_5 * (g_1 - f_1) - 2 * f_1 * f_4
+            let h_3 = (f_5 * f_5) * (g_1 - 2 * f_1) + (2 * f_2 * f_5) * (g_4 - f_4) - (2 * f_1 * f_6) + (f_2 * f_2 * g_6) - (f_4 * f_4)
+            let h_4 = f_5 * f_5 * (g_4 - 2 * f_4) + 2 * f_2 * f_5 * (g_6 - f_6) - 2 * f_4 * f_6
+            let h_5 = f_5 * f_5 * (g_6 - 2 * f_6) - f_6 * f_6
+            
+            
+            
             
             // CUTOFF
             
@@ -575,6 +737,12 @@ class Renderer {
             }
             avg_y /= max_run_length
             let avg_x = max_run_index + max_run_length / 2
+            
+            if (self.logoStart == nil) {
+                self.logoStart = [avg_x, avg_y]
+            } else {
+                self.logoCoM = [avg_x, avg_y]
+            }
             
             // Plots a triangle of the center of mass in Metal
             self.baryVertices = []
@@ -1275,6 +1443,7 @@ class Renderer {
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(cameraImageCbCr), index: 1)
         renderEncoder.setFragmentTexture(filteredDepthTexture, index: 2)
         renderEncoder.setFragmentTexture(CVMetalTextureGetTexture(confidenceTexture), index: 3)
+        renderEncoder.setFragmentTexture(sceneTexture, index: 4)
         // Draw final quad to display
         renderEncoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         
@@ -1357,6 +1526,14 @@ class Renderer {
         logoRaycastOutDescriptor.height = 1
         logoRaycastOutDescriptor.usage = [.shaderRead, .shaderWrite]
         logoRaycastOutTexture = device.makeTexture(descriptor: logoRaycastOutDescriptor)
+        
+        let sceneOutDescriptor = MTLTextureDescriptor()
+        sceneOutDescriptor.pixelFormat = .rgba8Unorm
+        sceneOutDescriptor.width = width
+        sceneOutDescriptor.height = height
+//        sceneOutDescriptor.storageMode = .private
+        sceneOutDescriptor.usage = MTLTextureUsage(rawValue: MTLTextureUsage.renderTarget.rawValue | MTLTextureUsage.shaderRead.rawValue)
+        sceneTexture = device.makeTexture(descriptor: sceneOutDescriptor)
         
 //        blurFilter = MPSImageGaussianBlur(device: device, sigma: 8)
         let luminanceWeights: [Float] = [ 0.333, 0.334, 0.333 ]
