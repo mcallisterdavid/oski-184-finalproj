@@ -49,6 +49,8 @@ class Renderer {
     let numLines: Int = 5
     var lineUpdate:Int = 0
     
+    var lastThree: [[Int]] = []
+    
     // Metal objects.
     var commandQueue: MTLCommandQueue!
     
@@ -223,12 +225,22 @@ class Renderer {
 //                    SCNMatrix4MakeRotation(<#T##angle: Float##Float#>, <#T##x: Float##Float#>, <#T##y: Float##Float#>, <#T##z: Float##Float#>)
                     
                     
+                    var x = 0
+                    var y = 0
+                    for pnt in self.lastThree {
+                        x += pnt[0]
+                        y += pnt[1]
+                    }
+                    x /= lastThree.count
+                    y /= lastThree.count
                     
-                    let logoDiff = [self.logoCoM[0] - self.logoStart[0], self.logoCoM[1] - self.logoStart[1]]
                     
-                    let rotate = SCNMatrix4MakeRotation(Float(logoDiff[0]) / 1100, 0, 0.45, 1)
                     
-                    let translate = SCNMatrix4Translate(ogTransform, 0.0 - Float(logoDiff[0]) / 15, 0.0 - Float(logoDiff[1]) / 160, 0)
+                    let logoDiff = [x - self.logoStart[0], y - self.logoStart[1]]
+                    
+                    let rotate = SCNMatrix4MakeRotation(Float(logoDiff[0]) / 2000, 0, 0.45, 1)
+                    
+                    let translate = SCNMatrix4Translate(ogTransform, 0.0 - Float(logoDiff[0]) / 15, 0.0 + Float(logoDiff[1]) / 30, 0)
                     
 //                    sceneRenderer.pointOfView?.transform = SCNMatrix4Mult(ogTransform, SCNMatrix4MakeScale(1 + 0.3 * sin(theta), 1 + 0.3 * sin(theta), 1 + 0.3 * sin(theta)))
                     
@@ -742,6 +754,11 @@ class Renderer {
                 self.logoStart = [avg_x, avg_y]
             } else {
                 self.logoCoM = [avg_x, avg_y]
+            }
+            
+            self.lastThree.append([avg_x, avg_y])
+            if (self.lastThree.count > 6) {
+                self.lastThree.remove(at: 0)
             }
             
             // Plots a triangle of the center of mass in Metal

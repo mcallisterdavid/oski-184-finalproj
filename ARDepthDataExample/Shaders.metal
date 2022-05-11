@@ -478,7 +478,7 @@ texture2d<float, access::sample> sceneTexture [[ texture(4) ]])
     float4 sceneSample = sceneTexture.sample(s, in.texCoordCamera);
     half4 cameraColor;
     if (sceneSample.r + sceneSample.g + sceneSample.b > 0) {
-        cameraColor = half4(sceneSample);
+        cameraColor = half4(rgb);
     } else {
         cameraColor = half4(rgb);
     }
